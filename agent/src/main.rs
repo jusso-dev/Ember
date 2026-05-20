@@ -1,3 +1,10 @@
+mod client;
+mod docker;
+mod enroll;
+mod executor;
+mod state;
+mod volumes;
+
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{prelude::*, EnvFilter};
 
@@ -32,12 +39,11 @@ async fn main() -> anyhow::Result<()> {
 
     let cli = Cli::parse();
     match cli.cmd {
-        Cmd::Enroll { server, name, .. } => {
-            tracing::info!(%server, %name, "enroll: not yet implemented (milestone 2)");
-        }
-        Cmd::Run => {
-            tracing::info!("run: not yet implemented (milestone 2)");
-        }
+        Cmd::Enroll {
+            server,
+            token,
+            name,
+        } => enroll::run(&server, &token, &name).await,
+        Cmd::Run => client::run().await,
     }
-    Ok(())
 }

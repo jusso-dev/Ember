@@ -10,7 +10,8 @@ version = "0.1.0"
 
 [workspace.dependencies]
 tokio = { version = "1.40", features = ["full"] }
-axum = "0.7"
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+axum = { version = "0.7", features = ["ws", "macros"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["trace", "cors"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -24,4 +25,12 @@ uuid = { version = "1.10", features = ["v7", "serde"] }
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 ts-rs = "10"
 clap = { version = "4.5", features = ["derive"] }
+argon2 = "0.5"
+rand = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+bollard = "0.18"
+futures-util = "0.3"
 ember-shared = { path = "shared" }

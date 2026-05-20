@@ -1,0 +1,5 @@
+CREATE TABLE sessions (
+  token       TEXT PRIMARY KEY,
+  expires_at  TIMESTAMP NOT NULL,
+  created_at  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

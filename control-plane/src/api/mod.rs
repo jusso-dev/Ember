@@ -1,12 +1,35 @@
+mod agent;
+mod auth;
+mod events;
 mod health;
+mod hosts;
+mod volumes;
+mod workloads;
 
-use axum::{routing::get, Router};
-use sqlx::SqlitePool;
+use crate::state::AppState;
+use axum::routing::{delete, get, post};
+use axum::Router;
 use tower_http::trace::TraceLayer;
 
-pub fn router(pool: SqlitePool) -> Router {
+pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health::get_health))
-        .with_state(pool)
+        .route("/api/auth/login", post(auth::login))
+        .route("/api/auth/logout", post(auth::logout))
+        .route("/api/auth/session", get(auth::session))
+        .route("/api/hosts", get(hosts::list))
+        .route("/api/hosts/enroll-token", post(hosts::enroll_token))
+        .route("/api/hosts/:id", get(hosts::get).delete(hosts::delete))
+        .route("/api/workloads", get(workloads::list).post(workloads::create))
+        .route("/api/workloads/:id", get(workloads::get))
+        .route("/api/workloads/:id", delete(workloads::delete))
+        .route("/api/workloads/:id/start", post(workloads::start))
+        .route("/api/workloads/:id/stop", post(workloads::stop))
+        .route("/api/volumes", get(volumes::list).post(volumes::create))
+        .route("/api/volumes/:id", delete(volumes::delete))
+        .route("/api/events", get(events::list))
+        .route("/api/agent/enroll", post(agent::enroll))
+        .route("/api/agent/connect", get(crate::agent_ws::ws_upgrade))
+        .with_state(state)
         .layer(TraceLayer::new_for_http())
 }

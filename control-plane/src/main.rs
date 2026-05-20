@@ -1,7 +1,12 @@
+mod agent_ws;
 mod api;
+mod auth;
 mod config;
 mod db;
 mod error;
+mod reconciler;
+mod scheduler;
+mod state;
 
 use anyhow::Context;
 use std::net::SocketAddr;
@@ -21,7 +26,19 @@ async fn main() -> anyhow::Result<()> {
     let pool = db::connect(&cfg.db_url).await.context("connect db")?;
     db::migrate(&pool).await.context("migrate db")?;
 
-    let app = api::router(pool);
+    let admin_hash = match &cfg.admin_password {
+        Some(pw) => Some(auth::hash_password(pw).context("hash admin password")?),
+        None => {
+            tracing::warn!("EMBER_ADMIN_PASSWORD not set; login is disabled");
+            None
+        }
+    };
+
+    let app_state = state::AppState::new(pool.clone(), admin_hash, cfg.public_base_url.clone());
+
+    tokio::spawn(reconciler::run(app_state.clone()));
+
+    let app = api::router(app_state);
 
     let addr: SocketAddr = cfg.bind_addr.parse().context("parse bind addr")?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
