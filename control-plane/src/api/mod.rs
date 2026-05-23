@@ -1,9 +1,11 @@
 mod access;
 mod agent;
+mod audit;
 mod auth;
 mod events;
 mod health;
 mod hosts;
+mod logs;
 mod volumes;
 mod workloads;
 
@@ -27,9 +29,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/workloads/:id", delete(workloads::delete))
         .route("/api/workloads/:id/start", post(workloads::start))
         .route("/api/workloads/:id/stop", post(workloads::stop))
+        .route("/api/workloads/:id/logs", get(logs::get_workload_logs))
         .route("/api/volumes", get(volumes::list).post(volumes::create))
         .route("/api/volumes/:id", delete(volumes::delete))
         .route("/api/events", get(events::list))
+        .route("/api/audit-logs", get(audit::list))
+        .route("/api/control-plane/logs", get(logs::get_control_plane_logs))
         .route("/api/tenants/current", get(access::current))
         .route("/api/tenants/current/invitations", post(access::create_invitation))
         .route(

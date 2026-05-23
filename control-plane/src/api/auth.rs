@@ -1,3 +1,4 @@
+use crate::audit::{self, AuditActor, RESULT_FAILURE, RESULT_SUCCESS};
 use crate::auth::{
     clear_session_cookie, create_session, destroy_session, hash_password, session_cookie,
     session_identity, users_count, verify_password, AdminSession, SESSION_COOKIE, SESSION_TTL_SECS,
@@ -10,23 +11,62 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use ember_shared::protocol::{CreateFirstUserRequest, LoginRequest, SessionInfo, TenantInfo, UserInfo};
+use serde_json::json;
 use uuid::Uuid;
 
 pub async fn login(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<LoginRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let email = normalize_email(&body.email)?;
+    let email = match normalize_email(&body.email) {
+        Ok(e) => e,
+        Err(err) => {
+            audit::record(
+                &state,
+                &AuditActor::anonymous(&headers),
+                "auth.login",
+                None,
+                None,
+                RESULT_FAILURE,
+                Some(json!({ "reason": "invalid_email" })),
+            )
+            .await;
+            return Err(err);
+        }
+    };
     let row: Option<(String, String, String, String)> = sqlx::query_as(
         "SELECT id, email, name, password_hash FROM users WHERE email = ? AND disabled_at IS NULL",
     )
-    .bind(email)
+    .bind(&email)
     .fetch_optional(&state.pool)
     .await?;
     let Some((id, email, name, password_hash)) = row else {
+        audit::record(
+            &state,
+            &AuditActor::anonymous(&headers).with_email(&email),
+            "auth.login",
+            None,
+            None,
+            RESULT_FAILURE,
+            Some(json!({ "reason": "unknown_user" })),
+        )
+        .await;
         return Err(AppError::Unauthorized);
     };
     if !verify_password(&body.password, &password_hash) {
+        audit::record(
+            &state,
+            &AuditActor::anonymous(&headers)
+                .with_email(&email)
+                .with_user_id(&id),
+            "auth.login",
+            Some("user"),
+            Some(&id),
+            RESULT_FAILURE,
+            Some(json!({ "reason": "bad_password" })),
+        )
+        .await;
         return Err(AppError::Unauthorized);
     }
     let tenant: (String, String, String, String) = sqlx::query_as(
@@ -47,11 +87,24 @@ pub async fn login(
     let (token, _exp) = create_session(&state.pool, &id, &active_tenant.id)
         .await
         .map_err(AppError::Anyhow)?;
-    let mut headers = HeaderMap::new();
-    headers.insert(SET_COOKIE, session_cookie(&token, SESSION_TTL_SECS).parse().unwrap());
+    audit::record(
+        &state,
+        &AuditActor::anonymous(&headers)
+            .with_user_id(&id)
+            .with_email(&email)
+            .with_tenant_id(&active_tenant.id),
+        "auth.login",
+        Some("user"),
+        Some(&id),
+        RESULT_SUCCESS,
+        None,
+    )
+    .await;
+    let mut out_headers = HeaderMap::new();
+    out_headers.insert(SET_COOKIE, session_cookie(&token, SESSION_TTL_SECS).parse().unwrap());
     Ok((
         StatusCode::OK,
-        headers,
+        out_headers,
         Json(SessionInfo {
             authenticated: true,
             setup_required: false,
@@ -68,6 +121,7 @@ pub async fn login(
 
 pub async fn create_first_user(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<CreateFirstUserRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     if users_count(&state.pool).await.map_err(AppError::Anyhow)? > 0 {
@@ -122,11 +176,24 @@ pub async fn create_first_user(
     let (token, _exp) = create_session(&state.pool, &id, &tenant_id)
         .await
         .map_err(AppError::Anyhow)?;
-    let mut headers = HeaderMap::new();
-    headers.insert(SET_COOKIE, session_cookie(&token, SESSION_TTL_SECS).parse().unwrap());
+    audit::record(
+        &state,
+        &AuditActor::anonymous(&headers)
+            .with_user_id(&id)
+            .with_email(&email)
+            .with_tenant_id(&tenant_id),
+        "auth.setup",
+        Some("tenant"),
+        Some(&tenant_id),
+        RESULT_SUCCESS,
+        Some(json!({ "tenant_name": tenant_name, "user_name": name })),
+    )
+    .await;
+    let mut out_headers = HeaderMap::new();
+    out_headers.insert(SET_COOKIE, session_cookie(&token, SESSION_TTL_SECS).parse().unwrap());
     Ok((
         StatusCode::CREATED,
-        headers,
+        out_headers,
         Json(SessionInfo {
             authenticated: true,
             setup_required: false,
@@ -150,9 +217,17 @@ pub async fn logout(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
+    let mut actor = AuditActor::anonymous(&headers);
     if let Some(token) = read_cookie(&headers) {
+        if let Ok(Some((user, tenant))) = crate::auth::session_identity(&state.pool, &token).await {
+            actor = actor
+                .with_user_id(&user.id)
+                .with_email(&user.email)
+                .with_tenant_id(&tenant.id);
+        }
         let _ = destroy_session(&state.pool, &token).await;
     }
+    audit::record(&state, &actor, "auth.logout", None, None, RESULT_SUCCESS, None).await;
     let mut out = HeaderMap::new();
     out.insert(SET_COOKIE, clear_session_cookie().parse().unwrap());
     let setup_required = users_count(&state.pool).await.unwrap_or(0) == 0;

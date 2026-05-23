@@ -1,13 +1,16 @@
+use crate::audit::{self, AuditActor, RESULT_SUCCESS};
 use crate::auth::{random_token, sha256_hex, AdminSession};
 use crate::error::AppError;
 use crate::state::AppState;
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::Json;
 use chrono::{DateTime, Utc};
 use ember_shared::protocol::{
     CreateTenantInvitationRequest, RolePermissionSummary, TenantAccessSummary,
     TenantInvitationSummary, TenantMemberSummary,
 };
+use serde_json::json;
 use uuid::Uuid;
 
 pub async fn current(
@@ -64,6 +67,7 @@ pub async fn current(
 pub async fn create_invitation(
     admin: AdminSession,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<CreateTenantInvitationRequest>,
 ) -> Result<Json<TenantInvitationSummary>, AppError> {
     require_access_admin(&admin)?;
@@ -104,6 +108,17 @@ pub async fn create_invitation(
     .execute(&state.pool)
     .await?;
 
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "access.invitation.create",
+        Some("invitation"),
+        Some(&id),
+        RESULT_SUCCESS,
+        Some(json!({ "email": email, "role": req.role })),
+    )
+    .await;
+
     Ok(Json(TenantInvitationSummary {
         id,
         email,
@@ -121,6 +136,7 @@ pub async fn create_invitation(
 pub async fn delete_invitation(
     admin: AdminSession,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
     require_access_admin(&admin)?;
@@ -129,12 +145,23 @@ pub async fn delete_invitation(
         .bind(&admin.tenant.id)
         .execute(&state.pool)
         .await?;
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "access.invitation.delete",
+        Some("invitation"),
+        Some(&id),
+        RESULT_SUCCESS,
+        None,
+    )
+    .await;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 pub async fn remove_member(
     admin: AdminSession,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(user_id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
     require_access_admin(&admin)?;
@@ -167,6 +194,16 @@ pub async fn remove_member(
         .bind(&user_id)
         .execute(&state.pool)
         .await?;
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "access.member.remove",
+        Some("user"),
+        Some(&user_id),
+        RESULT_SUCCESS,
+        Some(json!({ "removed_role": target_role })),
+    )
+    .await;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 

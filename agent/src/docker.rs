@@ -1,11 +1,11 @@
 use bollard::container::{
-    Config, CreateContainerOptions, ListContainersOptions, RemoveContainerOptions,
-    StartContainerOptions, StopContainerOptions,
+    Config, CreateContainerOptions, ListContainersOptions, LogOutput, LogsOptions,
+    RemoveContainerOptions, StartContainerOptions, StopContainerOptions,
 };
 use bollard::image::CreateImageOptions;
 use bollard::models::{HostConfig, PortBinding};
 use bollard::Docker;
-use ember_shared::protocol::{ContainerSummary, RunContainerSpec};
+use ember_shared::protocol::{ContainerSummary, LogLine, RunContainerSpec};
 use futures_util::StreamExt;
 use std::collections::HashMap;
 
@@ -149,6 +149,54 @@ pub async fn stop_container(name: &str, timeout_s: u32) -> anyhow::Result<()> {
             Ok(())
         }
         Err(e) => Err(e.into()),
+    }
+}
+
+pub async fn container_logs(name: &str, tail: u32) -> anyhow::Result<Vec<LogLine>> {
+    let d = client()?;
+    let opts = LogsOptions::<String> {
+        stdout: true,
+        stderr: true,
+        follow: false,
+        timestamps: true,
+        tail: tail.to_string(),
+        ..Default::default()
+    };
+    let mut stream = d.logs(name, Some(opts));
+    let mut out: Vec<LogLine> = Vec::new();
+    while let Some(item) = stream.next().await {
+        let (stream_name, bytes) = match item {
+            Ok(LogOutput::StdOut { message }) => ("stdout", message),
+            Ok(LogOutput::StdErr { message }) => ("stderr", message),
+            Ok(LogOutput::Console { message }) => ("stdout", message),
+            Ok(LogOutput::StdIn { .. }) => continue,
+            Err(bollard::errors::Error::DockerResponseServerError { status_code, .. })
+                if status_code == 404 =>
+            {
+                anyhow::bail!("container '{name}' not found");
+            }
+            Err(e) => return Err(e.into()),
+        };
+        let text = String::from_utf8_lossy(&bytes).to_string();
+        for raw in text.lines() {
+            let (ts, msg) = split_timestamp(raw);
+            out.push(LogLine {
+                stream: stream_name.to_string(),
+                timestamp: ts,
+                message: msg,
+            });
+        }
+    }
+    Ok(out)
+}
+
+fn split_timestamp(line: &str) -> (Option<String>, String) {
+    // Docker timestamps look like "2024-01-02T03:04:05.123456789Z rest of line"
+    match line.split_once(' ') {
+        Some((ts, rest)) if ts.len() >= 20 && ts.contains('T') && ts.ends_with('Z') => {
+            (Some(ts.to_string()), rest.to_string())
+        }
+        _ => (None, line.to_string()),
     }
 }
 

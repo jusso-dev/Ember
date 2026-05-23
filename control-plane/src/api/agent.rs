@@ -1,15 +1,19 @@
 use crate::agent_ws::log_event;
+use crate::audit::{self, AuditActor, RESULT_SUCCESS};
 use crate::auth::{random_token, sha256_hex};
 use crate::error::AppError;
 use crate::state::AppState;
 use axum::extract::State;
+use axum::http::HeaderMap;
 use axum::Json;
 use chrono::{DateTime, Utc};
 use ember_shared::protocol::{EnrollRequest, EnrollResponse};
+use serde_json::json;
 use uuid::Uuid;
 
 pub async fn enroll(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<EnrollRequest>,
 ) -> Result<Json<EnrollResponse>, AppError> {
     let token_hash = sha256_hex(&req.enrollment_token);
@@ -71,6 +75,21 @@ pub async fn enroll(
         None,
         "agent.enrolled",
         &format!("host '{}' enrolled", req.name),
+    )
+    .await;
+    audit::record(
+        &state,
+        &AuditActor::anonymous(&headers).with_email("agent"),
+        "agent.enroll",
+        Some("host"),
+        Some(&host_id),
+        RESULT_SUCCESS,
+        Some(json!({
+            "name": req.name,
+            "os": req.os,
+            "arch": req.arch,
+            "agent_version": req.agent_version,
+        })),
     )
     .await;
 

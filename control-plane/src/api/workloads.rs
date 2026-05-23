@@ -1,14 +1,17 @@
 use crate::agent_ws::{container_name, log_event};
+use crate::audit::{self, AuditActor, RESULT_SUCCESS};
 use crate::auth::AdminSession;
 use crate::error::AppError;
 use crate::scheduler;
 use crate::state::AppState;
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::Json;
 use chrono::{DateTime, Utc};
 use ember_shared::protocol::{
     Command, CreateWorkloadRequest, MountSpec, RunContainerSpec, WorkloadSummary,
 };
+use serde_json::json;
 use uuid::Uuid;
 
 pub async fn list(
@@ -92,8 +95,9 @@ pub async fn get(
 }
 
 pub async fn create(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<CreateWorkloadRequest>,
 ) -> Result<Json<WorkloadSummary>, AppError> {
     if req.name.trim().is_empty() || req.image.trim().is_empty() {
@@ -201,6 +205,20 @@ pub async fn create(
         &format!("created '{}' image={}", req.name, req.image),
     )
     .await;
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "workload.create",
+        Some("workload"),
+        Some(&workload_id),
+        RESULT_SUCCESS,
+        Some(json!({
+            "name": req.name,
+            "host_id": host_id,
+            "image": req.image,
+        })),
+    )
+    .await;
 
     Ok(Json(WorkloadSummary {
         id: workload_id,
@@ -217,8 +235,9 @@ pub async fn create(
 }
 
 pub async fn start(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
     let row: Option<(String, String, String, Option<String>)> = sqlx::query_as(
@@ -258,12 +277,23 @@ pub async fn start(
     let _ = scheduler::enqueue(&state, &host_id, Some(&id), None, &Command::RunContainer(spec))
         .await
         .map_err(AppError::Anyhow)?;
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "workload.start",
+        Some("workload"),
+        Some(&id),
+        RESULT_SUCCESS,
+        None,
+    )
+    .await;
     Ok(axum::http::StatusCode::ACCEPTED)
 }
 
 pub async fn stop(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
     let row: Option<(String,)> = sqlx::query_as("SELECT host_id FROM workloads WHERE id = ?")
@@ -287,12 +317,23 @@ pub async fn stop(
     )
     .await
     .map_err(AppError::Anyhow)?;
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "workload.stop",
+        Some("workload"),
+        Some(&id),
+        RESULT_SUCCESS,
+        None,
+    )
+    .await;
     Ok(axum::http::StatusCode::ACCEPTED)
 }
 
 pub async fn delete(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
     let row: Option<(String,)> = sqlx::query_as("SELECT host_id FROM workloads WHERE id = ?")
@@ -316,6 +357,16 @@ pub async fn delete(
     )
     .await
     .map_err(AppError::Anyhow)?;
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "workload.delete",
+        Some("workload"),
+        Some(&id),
+        RESULT_SUCCESS,
+        None,
+    )
+    .await;
     Ok(axum::http::StatusCode::ACCEPTED)
 }
 

@@ -140,6 +140,13 @@ async fn handle_agent_msg(state: &AppState, host_id: &str, msg: AgentMsg) -> any
         AgentMsg::TaskResult { task_id, result } => {
             scheduler::record_result(state, &task_id, host_id, &result).await?;
         }
+        AgentMsg::LogsResult { task_id, result } => {
+            if let Some(tx) = state.pending_logs.take(&task_id).await {
+                let _ = tx.send(result);
+            } else {
+                tracing::debug!(task_id = %task_id, "logs result with no pending request");
+            }
+        }
     }
     Ok(())
 }

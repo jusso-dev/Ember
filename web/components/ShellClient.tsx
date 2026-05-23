@@ -81,6 +81,27 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    id: 'observability',
+    label: 'Observability',
+    short: 'L',
+    items: [
+      {
+        href: '/logs/control-plane',
+        label: 'Control plane logs',
+        short: 'L',
+        description: 'Server tracing output',
+        keywords: ['logs', 'tracing', 'errors', 'server', 'control plane'],
+      },
+      {
+        href: '/audit',
+        label: 'Audit log',
+        short: 'U',
+        description: 'Who did what, and when',
+        keywords: ['audit', 'security', 'compliance', 'history', 'login'],
+      },
+    ],
+  },
+  {
     id: 'manage',
     label: 'Manage',
     short: 'M',
