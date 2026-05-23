@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Shell } from '@/components/Shell';
 import {
   EmptyState,
   PageHeader,
@@ -16,11 +15,7 @@ import { api } from '@/lib/api';
 import type { WorkloadSummary } from '@/lib/types/WorkloadSummary';
 
 export default function WorkloadsPage() {
-  return (
-    <Shell>
-      <Workloads />
-    </Shell>
-  );
+  return <Workloads />;
 }
 
 function Workloads() {

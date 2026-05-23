@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shell } from '@/components/Shell';
 import {
   PageHeader,
   buttonPrimaryClass,
@@ -14,11 +13,7 @@ import { api } from '@/lib/api';
 import type { HostSummary } from '@/lib/types/HostSummary';
 
 export default function NewVolumePage() {
-  return (
-    <Shell>
-      <NewVolume />
-    </Shell>
-  );
+  return <NewVolume />;
 }
 
 function NewVolume() {

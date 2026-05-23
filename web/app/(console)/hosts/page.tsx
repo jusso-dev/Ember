@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Shell } from '@/components/Shell';
 import {
   EmptyState,
   PageHeader,
@@ -17,11 +16,7 @@ import type { HostSummary } from '@/lib/types/HostSummary';
 import type { EnrollTokenResponse } from '@/lib/types/EnrollTokenResponse';
 
 export default function HostsPage() {
-  return (
-    <Shell>
-      <Hosts />
-    </Shell>
-  );
+  return <Hosts />;
 }
 
 function Hosts() {

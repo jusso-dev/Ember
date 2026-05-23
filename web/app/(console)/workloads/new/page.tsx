@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shell } from '@/components/Shell';
 import {
   PageHeader,
   buttonPrimaryClass,
@@ -19,11 +18,7 @@ type Port = { host_port: string; container_port: string; protocol: string };
 type Mount = { volume_id: string; mount_path: string; read_only: boolean };
 
 export default function NewWorkloadPage() {
-  return (
-    <Shell>
-      <NewWorkload />
-    </Shell>
-  );
+  return <NewWorkload />;
 }
 
 function NewWorkload() {

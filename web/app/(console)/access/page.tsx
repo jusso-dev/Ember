@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Shell } from '@/components/Shell';
 import {
   EmptyState,
   PageHeader,
@@ -14,14 +13,11 @@ import {
 } from '@/components/ControlPlaneUI';
 import { api, ApiError } from '@/lib/api';
 import type { CreateTenantInvitationRequest } from '@/lib/types/CreateTenantInvitationRequest';
-import type { TenantAccessSummary, TenantInvitationSummary } from '@/lib/types/TenantAccessSummary';
+import type { TenantAccessSummary } from '@/lib/types/TenantAccessSummary';
+import type { TenantInvitationSummary } from '@/lib/types/TenantInvitationSummary';
 
 export default function AccessPage() {
-  return (
-    <Shell>
-      <Access />
-    </Shell>
-  );
+  return <Access />;
 }
 
 function Access() {

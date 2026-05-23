@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Shell } from '@/components/Shell';
 import {
   EmptyState,
   PageHeader,
@@ -21,11 +20,7 @@ import type { EventRow } from '@/lib/types/EventRow';
 import type { Health } from '@/lib/types/Health';
 
 export default function DashboardPage() {
-  return (
-    <Shell>
-      <Dashboard />
-    </Shell>
-  );
+  return <Dashboard />;
 }
 
 function Dashboard() {
@@ -63,7 +58,7 @@ function Dashboard() {
   const runningWorkloads = workloads.filter((w) => w.observed_state === 'running').length;
   const workloadErrors = workloads.filter((w) => w.observed_state === 'error' || w.last_error).length;
   const readyVolumes = volumes.filter((v) => v.status === 'ready').length;
-  const totalVolumeMb = volumes.reduce((sum, v) => sum + v.size_mb, 0);
+  const totalVolumeMb = volumes.reduce((sum, v) => sum + Number(v.size_mb), 0);
   const newestHost = hosts
     .slice()
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())[0];

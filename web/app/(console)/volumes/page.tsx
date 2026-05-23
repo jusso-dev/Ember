@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Shell } from '@/components/Shell';
 import {
   EmptyState,
   PageHeader,
@@ -17,11 +16,7 @@ import { api, ApiError } from '@/lib/api';
 import type { VolumeSummary } from '@/lib/types/VolumeSummary';
 
 export default function VolumesPage() {
-  return (
-    <Shell>
-      <Volumes />
-    </Shell>
-  );
+  return <Volumes />;
 }
 
 function Volumes() {
@@ -57,7 +52,7 @@ function Volumes() {
     const text = `${v.name} ${v.host_name} ${v.backend} ${v.status} ${v.host_path ?? ''}`.toLowerCase();
     return matchesFilter && text.includes(query.toLowerCase());
   });
-  const totalMb = items.reduce((sum, v) => sum + v.size_mb, 0);
+  const totalMb = items.reduce((sum, v) => sum + Number(v.size_mb), 0);
 
   return (
     <div className="space-y-6">
@@ -132,7 +127,7 @@ function Volumes() {
                 </td>
                 <td className="px-4 py-2 text-zinc-400">{v.host_name}</td>
                 <td className="px-4 py-2 text-zinc-400">{v.backend}</td>
-                <td className="px-4 py-2 text-zinc-400">{formatSize(v.size_mb)}</td>
+                <td className="px-4 py-2 text-zinc-400">{formatSize(Number(v.size_mb))}</td>
                 <td className="px-4 py-2">
                   <StatusBadge state={v.status} />
                 </td>
