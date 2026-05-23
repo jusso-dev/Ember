@@ -3,6 +3,15 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Shell } from '@/components/Shell';
+import {
+  EmptyState,
+  PageHeader,
+  StatusBadge,
+  buttonPrimaryClass,
+  formatRelative,
+  inputClass,
+  panelClass,
+} from '@/components/ControlPlaneUI';
 import { api } from '@/lib/api';
 import type { WorkloadSummary } from '@/lib/types/WorkloadSummary';
 
@@ -16,6 +25,8 @@ export default function WorkloadsPage() {
 
 function Workloads() {
   const [items, setItems] = useState<WorkloadSummary[]>([]);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('all');
 
   function reload() {
     api.get<WorkloadSummary[]>('/api/workloads').then(setItems).catch(() => {});
@@ -44,18 +55,44 @@ function Workloads() {
     }
   }
 
+  const visibleItems = items.filter((w) => {
+    const matchesFilter = filter === 'all' || w.observed_state === filter || w.desired_state === filter;
+    const text = `${w.name} ${w.host_name} ${w.image} ${w.observed_state}`.toLowerCase();
+    return matchesFilter && text.includes(query.toLowerCase());
+  });
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Workloads</h1>
+      <PageHeader title="Workloads" eyebrow="Container services">
         <Link
           href="/workloads/new"
-          className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500"
+          className={buttonPrimaryClass}
         >
           New workload
         </Link>
+      </PageHeader>
+      <div className="grid gap-3 sm:grid-cols-4">
+        <MiniStat label="Running" value={items.filter((w) => w.observed_state === 'running').length} />
+        <MiniStat label="Desired running" value={items.filter((w) => w.desired_state === 'running').length} />
+        <MiniStat label="Converging" value={items.filter((w) => w.desired_state !== w.observed_state).length} />
+        <MiniStat label="Errors" value={items.filter((w) => w.last_error || w.observed_state === 'error').length} />
       </div>
-      <div className="overflow-hidden rounded-lg border border-zinc-800">
+      <div className={`${panelClass} overflow-hidden`}>
+        <div className="flex flex-col gap-3 border-b border-zinc-800 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search workloads..."
+            className={`${inputClass} w-full sm:w-80`}
+          />
+          <select value={filter} onChange={(e) => setFilter(e.target.value)} className={inputClass}>
+            <option value="all">All states</option>
+            <option value="running">Running</option>
+            <option value="pending">Pending</option>
+            <option value="stopped">Stopped</option>
+            <option value="error">Error</option>
+          </select>
+        </div>
         <table className="w-full text-sm">
           <thead className="bg-zinc-900/60 text-left text-xs uppercase tracking-wider text-zinc-500">
             <tr>
@@ -70,19 +107,36 @@ function Workloads() {
           <tbody className="divide-y divide-zinc-800">
             {items.length === 0 && (
               <tr>
-                <td className="px-4 py-6 text-center text-zinc-500" colSpan={6}>
-                  No workloads yet.
+                <td colSpan={6}>
+                  <EmptyState
+                    title="No workloads deployed"
+                    body="Create a workload to run a Docker image on one enrolled host."
+                    href="/workloads/new"
+                    action="New workload"
+                  />
                 </td>
               </tr>
             )}
-            {items.map((w) => (
+            {items.length > 0 && visibleItems.length === 0 && (
+              <tr>
+                <td className="px-4 py-8 text-center text-sm text-zinc-500" colSpan={6}>
+                  No workloads match the current filters.
+                </td>
+              </tr>
+            )}
+            {visibleItems.map((w) => (
               <tr key={w.id} className="align-top hover:bg-zinc-900/30">
-                <td className="px-4 py-2 font-mono">{w.name}</td>
+                <td className="px-4 py-2">
+                  <div className="font-mono">{w.name}</div>
+                  <div className="mt-1 text-xs text-zinc-500">{formatRelative(w.created_at)}</div>
+                </td>
                 <td className="px-4 py-2 text-zinc-400">{w.host_name}</td>
                 <td className="px-4 py-2 font-mono text-xs text-zinc-300">{w.image}</td>
-                <td className="px-4 py-2 text-zinc-400">{w.desired_state}</td>
                 <td className="px-4 py-2">
-                  <StateBadge state={w.observed_state} />
+                  <StatusBadge state={w.desired_state} />
+                </td>
+                <td className="px-4 py-2">
+                  <StatusBadge state={w.observed_state} />
                   {w.last_error && (
                     <div className="mt-1 max-w-md truncate text-xs text-red-400" title={w.last_error}>
                       {w.last_error}
@@ -124,14 +178,11 @@ function Workloads() {
   );
 }
 
-function StateBadge({ state }: { state: string }) {
-  const color =
-    state === 'running'
-      ? 'text-emerald-400'
-      : state === 'pending'
-        ? 'text-amber-400'
-        : state === 'error'
-          ? 'text-red-400'
-          : 'text-zinc-400';
-  return <span className={`text-sm ${color}`}>{state}</span>;
+function MiniStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className={`${panelClass} px-4 py-3`}>
+      <div className="text-xs uppercase tracking-wider text-zinc-500">{label}</div>
+      <div className="mt-1 text-2xl font-semibold text-zinc-50">{value}</div>
+    </div>
+  );
 }

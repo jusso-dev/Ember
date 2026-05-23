@@ -1,3 +1,4 @@
+mod access;
 mod agent;
 mod auth;
 mod events;
@@ -14,6 +15,7 @@ use tower_http::trace::TraceLayer;
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health::get_health))
+        .route("/api/auth/setup", post(auth::create_first_user))
         .route("/api/auth/login", post(auth::login))
         .route("/api/auth/logout", post(auth::logout))
         .route("/api/auth/session", get(auth::session))
@@ -28,6 +30,16 @@ pub fn router(state: AppState) -> Router {
         .route("/api/volumes", get(volumes::list).post(volumes::create))
         .route("/api/volumes/:id", delete(volumes::delete))
         .route("/api/events", get(events::list))
+        .route("/api/tenants/current", get(access::current))
+        .route("/api/tenants/current/invitations", post(access::create_invitation))
+        .route(
+            "/api/tenants/current/invitations/:id",
+            delete(access::delete_invitation),
+        )
+        .route(
+            "/api/tenants/current/members/:id",
+            delete(access::remove_member),
+        )
         .route("/api/agent/enroll", post(agent::enroll))
         .route("/api/agent/connect", get(crate::agent_ws::ws_upgrade))
         .with_state(state)

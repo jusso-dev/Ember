@@ -3,6 +3,16 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Shell } from '@/components/Shell';
+import {
+  EmptyState,
+  PageHeader,
+  StatusBadge,
+  buttonPrimaryClass,
+  formatRelative,
+  formatSize,
+  inputClass,
+  panelClass,
+} from '@/components/ControlPlaneUI';
 import { api, ApiError } from '@/lib/api';
 import type { VolumeSummary } from '@/lib/types/VolumeSummary';
 
@@ -16,6 +26,8 @@ export default function VolumesPage() {
 
 function Volumes() {
   const [items, setItems] = useState<VolumeSummary[]>([]);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState('all');
 
   function reload() {
     api.get<VolumeSummary[]>('/api/volumes').then(setItems).catch(() => {});
@@ -40,18 +52,46 @@ function Volumes() {
     }
   }
 
+  const visibleItems = items.filter((v) => {
+    const matchesFilter = filter === 'all' || v.status === filter || v.backend === filter;
+    const text = `${v.name} ${v.host_name} ${v.backend} ${v.status} ${v.host_path ?? ''}`.toLowerCase();
+    return matchesFilter && text.includes(query.toLowerCase());
+  });
+  const totalMb = items.reduce((sum, v) => sum + v.size_mb, 0);
+
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold tracking-tight">Volumes</h1>
+      <PageHeader title="Volumes" eyebrow="Host-local storage">
         <Link
           href="/volumes/new"
-          className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-emerald-500"
+          className={buttonPrimaryClass}
         >
           New volume
         </Link>
+      </PageHeader>
+      <div className="grid gap-3 sm:grid-cols-4">
+        <MiniStat label="Provisioned" value={formatSize(totalMb)} />
+        <MiniStat label="Ready" value={items.filter((v) => v.status === 'ready').length} />
+        <MiniStat label="Pending" value={items.filter((v) => v.status === 'pending').length} />
+        <MiniStat label="Backends" value={new Set(items.map((v) => v.backend)).size} />
       </div>
-      <div className="overflow-hidden rounded-lg border border-zinc-800">
+      <div className={`${panelClass} overflow-hidden`}>
+        <div className="flex flex-col gap-3 border-b border-zinc-800 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search volumes..."
+            className={`${inputClass} w-full sm:w-80`}
+          />
+          <select value={filter} onChange={(e) => setFilter(e.target.value)} className={inputClass}>
+            <option value="all">All volumes</option>
+            <option value="ready">Ready</option>
+            <option value="pending">Pending</option>
+            <option value="error">Error</option>
+            <option value="hostdir">hostdir</option>
+            <option value="loopback_ext4">loopback_ext4</option>
+          </select>
+        </div>
         <table className="w-full text-sm">
           <thead className="bg-zinc-900/60 text-left text-xs uppercase tracking-wider text-zinc-500">
             <tr>
@@ -67,19 +107,38 @@ function Volumes() {
           <tbody className="divide-y divide-zinc-800">
             {items.length === 0 && (
               <tr>
-                <td className="px-4 py-6 text-center text-zinc-500" colSpan={7}>
-                  No volumes yet.
+                <td colSpan={7}>
+                  <EmptyState
+                    title="No volumes created"
+                    body="Create host-local storage before mounting durable paths into workloads."
+                    href="/volumes/new"
+                    action="New volume"
+                  />
                 </td>
               </tr>
             )}
-            {items.map((v) => (
+            {items.length > 0 && visibleItems.length === 0 && (
+              <tr>
+                <td className="px-4 py-8 text-center text-sm text-zinc-500" colSpan={7}>
+                  No volumes match the current filters.
+                </td>
+              </tr>
+            )}
+            {visibleItems.map((v) => (
               <tr key={v.id} className="hover:bg-zinc-900/30">
-                <td className="px-4 py-2 font-mono">{v.name}</td>
+                <td className="px-4 py-2">
+                  <div className="font-mono">{v.name}</div>
+                  <div className="mt-1 text-xs text-zinc-500">{formatRelative(v.created_at)}</div>
+                </td>
                 <td className="px-4 py-2 text-zinc-400">{v.host_name}</td>
                 <td className="px-4 py-2 text-zinc-400">{v.backend}</td>
-                <td className="px-4 py-2 text-zinc-400">{v.size_mb} MB</td>
-                <td className="px-4 py-2 text-zinc-300">{v.status}</td>
-                <td className="px-4 py-2 font-mono text-xs text-zinc-400">{v.host_path ?? '—'}</td>
+                <td className="px-4 py-2 text-zinc-400">{formatSize(v.size_mb)}</td>
+                <td className="px-4 py-2">
+                  <StatusBadge state={v.status} />
+                </td>
+                <td className="max-w-xs truncate px-4 py-2 font-mono text-xs text-zinc-400">
+                  {v.host_path ?? '-'}
+                </td>
                 <td className="px-4 py-2 text-right">
                   <button
                     onClick={() => remove(v.id)}
@@ -93,6 +152,15 @@ function Volumes() {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className={`${panelClass} px-4 py-3`}>
+      <div className="text-xs uppercase tracking-wider text-zinc-500">{label}</div>
+      <div className="mt-1 text-2xl font-semibold text-zinc-50">{value}</div>
     </div>
   );
 }

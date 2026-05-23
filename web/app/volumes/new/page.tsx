@@ -3,6 +3,13 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Shell } from '@/components/Shell';
+import {
+  PageHeader,
+  buttonPrimaryClass,
+  buttonSecondaryClass,
+  inputClass,
+  panelClass,
+} from '@/components/ControlPlaneUI';
 import { api } from '@/lib/api';
 import type { HostSummary } from '@/lib/types/HostSummary';
 
@@ -55,69 +62,62 @@ function NewVolume() {
   }
 
   return (
-    <form onSubmit={submit} className="mx-auto max-w-md space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">New volume</h1>
+    <form onSubmit={submit} className="mx-auto max-w-3xl space-y-6">
+      <PageHeader title="New volume" eyebrow="Provision storage" />
 
-      <Field label="Host">
-        <select
-          required
-          value={hostId}
-          onChange={(e) => setHostId(e.target.value)}
-          className={inputClass}
-        >
-          <option value="">Choose host…</option>
-          {hosts.map((h) => (
-            <option key={h.id} value={h.id}>
-              {h.name} ({h.status})
-            </option>
-          ))}
-        </select>
-      </Field>
+      <div className={`${panelClass} space-y-5 p-5`}>
+        <Field label="Host">
+          <select required value={hostId} onChange={(e) => setHostId(e.target.value)} className={inputClass}>
+            <option value="">Choose host...</option>
+            {hosts.map((h) => (
+              <option key={h.id} value={h.id}>
+                {h.name} ({h.status})
+              </option>
+            ))}
+          </select>
+        </Field>
 
-      <Field label="Name">
-        <input required value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
-      </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Name">
+            <input required value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+          </Field>
 
-      <Field label="Size (MB)">
-        <input
-          required
-          inputMode="numeric"
-          value={sizeMb}
-          onChange={(e) => setSizeMb(e.target.value)}
-          className={inputClass}
-        />
-      </Field>
+          <Field label="Size (MB)">
+            <input
+              required
+              inputMode="numeric"
+              value={sizeMb}
+              onChange={(e) => setSizeMb(e.target.value)}
+              className={inputClass}
+            />
+          </Field>
+        </div>
 
-      <Field label="Backend">
-        <select value={backend} onChange={(e) => setBackend(e.target.value)} className={inputClass}>
-          <option value="hostdir">hostdir (bind-mount a directory)</option>
-          <option value="loopback_ext4">loopback_ext4 (requires root on agent)</option>
-        </select>
-      </Field>
+        <Field label="Backend">
+          <select value={backend} onChange={(e) => setBackend(e.target.value)} className={inputClass}>
+            <option value="hostdir">hostdir (bind-mount a directory)</option>
+            <option value="loopback_ext4">loopback_ext4 (requires root on agent)</option>
+          </select>
+        </Field>
+
+        <div className="rounded border border-zinc-800 bg-zinc-950/50 p-3 text-sm text-zinc-500">
+          The control plane records the requested quota. `hostdir` creates a directory under the
+          agent volume root; `loopback_ext4` needs elevated agent privileges.
+        </div>
+      </div>
 
       {err && <p className="text-sm text-red-400">{err}</p>}
       <div className="flex gap-3">
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-50"
-        >
-          {busy ? 'Creating…' : 'Create volume'}
+        <button type="submit" disabled={busy || !hosts.length} className={buttonPrimaryClass}>
+          {busy ? 'Creating...' : 'Create volume'}
         </button>
-        <button
-          type="button"
-          onClick={() => router.back()}
-          className="rounded border border-zinc-700 px-4 py-2 text-sm text-zinc-300 hover:bg-zinc-800"
-        >
+        <button type="button" onClick={() => router.back()} className={buttonSecondaryClass}>
           Cancel
         </button>
       </div>
     </form>
   );
 }
-
-const inputClass =
-  'w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 outline-none focus:border-zinc-500';
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (

@@ -26,15 +26,11 @@ async fn main() -> anyhow::Result<()> {
     let pool = db::connect(&cfg.db_url).await.context("connect db")?;
     db::migrate(&pool).await.context("migrate db")?;
 
-    let admin_hash = match &cfg.admin_password {
-        Some(pw) => Some(auth::hash_password(pw).context("hash admin password")?),
-        None => {
-            tracing::warn!("EMBER_ADMIN_PASSWORD not set; login is disabled");
-            None
-        }
-    };
+    if cfg.admin_password.is_some() {
+        tracing::warn!("EMBER_ADMIN_PASSWORD is ignored; use the first-run user setup flow");
+    }
 
-    let app_state = state::AppState::new(pool.clone(), admin_hash, cfg.public_base_url.clone());
+    let app_state = state::AppState::new(pool.clone(), cfg.public_base_url.clone());
 
     tokio::spawn(reconciler::run(app_state.clone()));
 

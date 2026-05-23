@@ -7,6 +7,7 @@ use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use base64::Engine;
 use chrono::{DateTime, Utc};
+use ember_shared::protocol::{TenantInfo, UserInfo};
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
@@ -42,11 +43,17 @@ pub fn sha256_hex(s: &str) -> String {
     hex::encode(digest)
 }
 
-pub async fn create_session(pool: &sqlx::SqlitePool) -> anyhow::Result<(String, DateTime<Utc>)> {
+pub async fn create_session(
+    pool: &sqlx::SqlitePool,
+    user_id: &str,
+    active_tenant_id: &str,
+) -> anyhow::Result<(String, DateTime<Utc>)> {
     let token = random_token(32);
     let expires = Utc::now() + chrono::Duration::seconds(SESSION_TTL_SECS);
-    sqlx::query("INSERT INTO sessions (token, expires_at) VALUES (?, ?)")
+    sqlx::query("INSERT INTO sessions (token, user_id, active_tenant_id, expires_at) VALUES (?, ?, ?, ?)")
         .bind(&token)
+        .bind(user_id)
+        .bind(active_tenant_id)
         .bind(expires)
         .execute(pool)
         .await?;
@@ -61,16 +68,82 @@ pub async fn destroy_session(pool: &sqlx::SqlitePool, token: &str) -> anyhow::Re
     Ok(())
 }
 
-pub async fn session_valid(pool: &sqlx::SqlitePool, token: &str) -> anyhow::Result<bool> {
-    let row: Option<(DateTime<Utc>,)> =
-        sqlx::query_as("SELECT expires_at FROM sessions WHERE token = ?")
+pub async fn session_identity(
+    pool: &sqlx::SqlitePool,
+    token: &str,
+) -> anyhow::Result<Option<(UserInfo, TenantInfo)>> {
+    let row: Option<(
+        DateTime<Utc>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    )> =
+        sqlx::query_as(
+            r#"
+            SELECT sessions.expires_at,
+                   users.id,
+                   users.email,
+                   users.name,
+                   tenant_memberships.role,
+                   tenants.id,
+                   tenants.name,
+                   tenants.slug,
+                   tenant_memberships.role
+            FROM sessions
+            LEFT JOIN users ON users.id = sessions.user_id
+            LEFT JOIN tenants ON tenants.id = sessions.active_tenant_id
+            LEFT JOIN tenant_memberships
+              ON tenant_memberships.tenant_id = tenants.id
+             AND tenant_memberships.user_id = users.id
+            WHERE sessions.token = ?
+              AND users.disabled_at IS NULL
+            "#,
+        )
             .bind(token)
             .fetch_optional(pool)
             .await?;
-    Ok(match row {
-        Some((exp,)) => exp > Utc::now(),
-        None => false,
-    })
+    let Some((
+        expires_at,
+        Some(user_id),
+        Some(email),
+        Some(name),
+        Some(user_role),
+        Some(tenant_id),
+        Some(tenant_name),
+        Some(tenant_slug),
+        Some(tenant_role),
+    )) = row else {
+        return Ok(None);
+    };
+    if expires_at <= Utc::now() {
+        return Ok(None);
+    }
+    Ok(Some((
+        UserInfo {
+            id: user_id,
+            email,
+            name,
+            role: user_role,
+        },
+        TenantInfo {
+            id: tenant_id,
+            name: tenant_name,
+            slug: tenant_slug,
+            role: tenant_role,
+        },
+    )))
+}
+
+pub async fn users_count(pool: &sqlx::SqlitePool) -> anyhow::Result<i64> {
+    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users")
+        .fetch_one(pool)
+        .await?;
+    Ok(count)
 }
 
 pub fn session_cookie(token: &str, max_age_secs: i64) -> String {
@@ -96,7 +169,11 @@ fn cookie_from_header(parts: &Parts) -> Option<String> {
     None
 }
 
-pub struct AdminSession;
+#[allow(dead_code)]
+pub struct AdminSession {
+    pub user: UserInfo,
+    pub tenant: TenantInfo,
+}
 
 #[async_trait]
 impl FromRequestParts<AppState> for AdminSession {
@@ -106,18 +183,13 @@ impl FromRequestParts<AppState> for AdminSession {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        if state.admin_hash.is_none() {
-            return Err(AppError::Unauthorized);
-        }
         let token = cookie_from_header(parts).ok_or(AppError::Unauthorized)?;
-        let ok = session_valid(&state.pool, &token)
+        let identity = session_identity(&state.pool, &token)
             .await
             .map_err(AppError::Anyhow)?;
-        if ok {
-            Ok(AdminSession)
-        } else {
-            Err(AppError::Unauthorized)
-        }
+        identity
+            .map(|(user, tenant)| AdminSession { user, tenant })
+            .ok_or(AppError::Unauthorized)
     }
 }
 

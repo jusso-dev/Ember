@@ -13,6 +13,7 @@ pub struct Health {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../web/lib/types/")]
 pub struct LoginRequest {
+    pub email: String,
     pub password: String,
 }
 
@@ -20,6 +21,81 @@ pub struct LoginRequest {
 #[ts(export, export_to = "../../web/lib/types/")]
 pub struct SessionInfo {
     pub authenticated: bool,
+    pub setup_required: bool,
+    pub user: Option<UserInfo>,
+    pub active_tenant: Option<TenantInfo>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct UserInfo {
+    pub id: String,
+    pub email: String,
+    pub name: String,
+    pub role: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct TenantInfo {
+    pub id: String,
+    pub name: String,
+    pub slug: String,
+    pub role: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct CreateFirstUserRequest {
+    pub email: String,
+    pub name: String,
+    pub password: String,
+    pub tenant_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct TenantMemberSummary {
+    pub user_id: String,
+    pub email: String,
+    pub name: String,
+    pub role: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct TenantInvitationSummary {
+    pub id: String,
+    pub email: String,
+    pub role: String,
+    pub expires_at: String,
+    pub created_at: String,
+    pub invite_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct TenantAccessSummary {
+    pub tenant: TenantInfo,
+    pub members: Vec<TenantMemberSummary>,
+    pub invitations: Vec<TenantInvitationSummary>,
+    pub role_matrix: Vec<RolePermissionSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct RolePermissionSummary {
+    pub role: String,
+    pub description: String,
+    pub permissions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct CreateTenantInvitationRequest {
+    pub email: String,
+    pub role: String,
 }
 
 // --- Hosts ---

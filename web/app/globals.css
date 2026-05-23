@@ -1,3 +1,17 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background:
+    radial-gradient(circle at 18% 0%, oklch(0.28 0.04 245 / 0.3), transparent 28rem),
+    linear-gradient(180deg, oklch(0.18 0.008 255), oklch(0.145 0.009 255));
+}
+
+::selection {
+  background: oklch(0.64 0.14 245 / 0.35);
+}
