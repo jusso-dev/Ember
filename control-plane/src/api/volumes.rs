@@ -1,12 +1,15 @@
 use crate::agent_ws::log_event;
+use crate::audit::{self, AuditActor, RESULT_SUCCESS};
 use crate::auth::AdminSession;
 use crate::error::AppError;
 use crate::scheduler;
 use crate::state::AppState;
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::Json;
 use chrono::{DateTime, Utc};
 use ember_shared::protocol::{Command, CreateVolumeRequest, VolumeProvisionSpec, VolumeSummary};
+use serde_json::json;
 use uuid::Uuid;
 
 pub async fn list(
@@ -48,8 +51,9 @@ pub async fn list(
 }
 
 pub async fn create(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<CreateVolumeRequest>,
 ) -> Result<Json<VolumeSummary>, AppError> {
     if req.name.trim().is_empty() {
@@ -108,6 +112,21 @@ pub async fn create(
         &format!("create volume '{}' backend={}", req.name, req.backend),
     )
     .await;
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "volume.create",
+        Some("volume"),
+        Some(&volume_id),
+        RESULT_SUCCESS,
+        Some(json!({
+            "name": req.name,
+            "host_id": host_id,
+            "backend": req.backend,
+            "size_mb": req.size_mb,
+        })),
+    )
+    .await;
 
     Ok(Json(VolumeSummary {
         id: volume_id,
@@ -123,8 +142,9 @@ pub async fn create(
 }
 
 pub async fn delete(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
     let row: Option<(String, i64, String)> =
@@ -158,5 +178,15 @@ pub async fn delete(
     )
     .await
     .map_err(AppError::Anyhow)?;
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "volume.delete",
+        Some("volume"),
+        Some(&id),
+        RESULT_SUCCESS,
+        None,
+    )
+    .await;
     Ok(axum::http::StatusCode::ACCEPTED)
 }

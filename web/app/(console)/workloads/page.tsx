@@ -122,7 +122,9 @@ function Workloads() {
             {visibleItems.map((w) => (
               <tr key={w.id} className="align-top hover:bg-zinc-900/30">
                 <td className="px-4 py-2">
-                  <div className="font-mono">{w.name}</div>
+                  <Link href={`/workloads/${w.id}`} className="font-mono text-sky-300 hover:underline">
+                    {w.name}
+                  </Link>
                   <div className="mt-1 text-xs text-zinc-500">{formatRelative(w.created_at)}</div>
                 </td>
                 <td className="px-4 py-2 text-zinc-400">{w.host_name}</td>
@@ -140,6 +142,12 @@ function Workloads() {
                 </td>
                 <td className="px-4 py-2 text-right">
                   <div className="flex justify-end gap-3">
+                    <Link
+                      href={`/workloads/${w.id}`}
+                      className="text-xs text-sky-300 hover:text-sky-200"
+                    >
+                      Logs
+                    </Link>
                     {w.desired_state !== 'running' && (
                       <button
                         onClick={() => action(w.id, 'start')}

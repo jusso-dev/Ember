@@ -18,6 +18,10 @@ pub async fn enqueue(
         Command::RemoveContainer { .. } => "RemoveContainer",
         Command::CreateVolume(_) => "CreateVolume",
         Command::DeleteVolume(_) => "DeleteVolume",
+        // Log fetches are not persisted as scheduled tasks; they are dispatched
+        // directly via the WebSocket registry from `api::logs`. This arm keeps
+        // the match exhaustive in case of misuse.
+        Command::FetchContainerLogs { .. } => "FetchContainerLogs",
         Command::Ping => "Ping",
     };
     let payload = serde_json::to_string(command)?;

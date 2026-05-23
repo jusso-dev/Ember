@@ -95,8 +95,8 @@ async fn connect_and_serve(s: &AgentState) -> anyhow::Result<()> {
             ServerMsg::Command { task_id, command } => {
                 let tx_clone = out_tx.clone();
                 tokio::spawn(async move {
-                    let result = executor::execute(&command).await;
-                    let _ = tx_clone.send(AgentMsg::TaskResult { task_id, result });
+                    let msg = executor::execute(task_id, &command).await;
+                    let _ = tx_clone.send(msg);
                 });
             }
         }

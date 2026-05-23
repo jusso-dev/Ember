@@ -1,10 +1,13 @@
+use crate::audit::{self, AuditActor, RESULT_SUCCESS};
 use crate::auth::{random_token, sha256_hex, AdminSession};
 use crate::error::AppError;
 use crate::state::AppState;
 use axum::extract::{Path, State};
+use axum::http::HeaderMap;
 use axum::Json;
 use chrono::{DateTime, Utc};
 use ember_shared::protocol::{EnrollTokenResponse, HostSummary};
+use serde_json::json;
 use uuid::Uuid;
 
 pub async fn list(
@@ -78,8 +81,9 @@ pub async fn get(
 }
 
 pub async fn delete(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
     let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM workloads WHERE host_id = ?")
@@ -101,12 +105,23 @@ pub async fn delete(
         .bind(&id)
         .execute(&state.pool)
         .await?;
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "host.delete",
+        Some("host"),
+        Some(&id),
+        RESULT_SUCCESS,
+        None,
+    )
+    .await;
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 pub async fn enroll_token(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<EnrollTokenResponse>, AppError> {
     let token = random_token(32);
     let hash = sha256_hex(&token);
@@ -123,6 +138,16 @@ pub async fn enroll_token(
         base = state.public_base_url.as_str(),
         token = token,
     );
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "host.enroll_token.create",
+        Some("enrollment_token"),
+        Some(&id),
+        RESULT_SUCCESS,
+        Some(json!({ "expires_at": expires.to_rfc3339() })),
+    )
+    .await;
     Ok(Json(EnrollTokenResponse {
         token,
         install_command,

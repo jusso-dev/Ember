@@ -224,6 +224,62 @@ pub struct EventRow {
     pub message: String,
 }
 
+// --- Audit log ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct AuditLogRow {
+    pub id: i64,
+    pub ts: String,
+    pub actor_user_id: Option<String>,
+    pub actor_email: Option<String>,
+    pub actor_tenant_id: Option<String>,
+    pub action: String,
+    pub resource_type: Option<String>,
+    pub resource_id: Option<String>,
+    pub result: String,
+    pub ip_address: Option<String>,
+    pub user_agent: Option<String>,
+    pub details: Option<String>,
+}
+
+// --- Logs (workload container + control plane) ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct LogLine {
+    pub stream: String, // "stdout" | "stderr"
+    pub timestamp: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct WorkloadLogsResponse {
+    pub workload_id: String,
+    pub host_id: String,
+    pub fetched_at: String,
+    pub lines: Vec<LogLine>,
+    pub truncated: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct ControlPlaneLogLine {
+    pub ts: String,
+    pub level: String,
+    pub target: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct ControlPlaneLogsResponse {
+    pub lines: Vec<ControlPlaneLogLine>,
+    pub capacity: u32,
+}
+
 // --- Wire protocol: control-plane <-> agent over WebSocket ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -271,6 +327,11 @@ pub enum Command {
     RemoveContainer { name: String, force: bool },
     CreateVolume(VolumeProvisionSpec),
     DeleteVolume(VolumeProvisionSpec),
+    FetchContainerLogs {
+        workload_id: String,
+        name: String,
+        tail_lines: u32,
+    },
     Ping,
 }
 
@@ -301,10 +362,20 @@ pub struct TaskResultData {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct LogsResultData {
+    pub success: bool,
+    pub message: Option<String>,
+    pub lines: Vec<LogLine>,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "type")]
 #[ts(export, export_to = "../../web/lib/types/")]
 pub enum AgentMsg {
     Hello(HelloPayload),
     Ping { containers: Vec<ContainerSummary> },
     TaskResult { task_id: String, result: TaskResultData },
+    LogsResult { task_id: String, result: LogsResultData },
 }
