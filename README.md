@@ -161,11 +161,13 @@ cargo test -p ember-shared
 bash scripts/dev.sh
 ```
 
-Open <http://localhost:3000>.
+Open <http://localhost:3000> on the development machine, or use the LAN URL printed by `scripts/dev.sh` from another machine on your network.
 
 On the first run, create the owner account and tenant in the web UI. There is no default admin password.
 
-The Next.js app runs on port `3000` and proxies `/api/*` to the control plane at `http://127.0.0.1:8080`.
+The dev script binds the Rust control plane to `0.0.0.0:8080`, binds the Next.js app to `0.0.0.0:3000`, and sets `EMBER_PUBLIC_BASE_URL` to `http://<host-lan-ip>:3000`. The generated host enrollment command uses that LAN-facing web URL so another homelab machine can run it directly.
+
+The Next.js app proxies `/api/*` to the control plane at `http://127.0.0.1:8080` from the web server process.
 
 ## Running The Control Plane In Docker
 
@@ -179,10 +181,10 @@ docker volume create ember-cargo-git
 docker rm -f ember-control-plane 2>/dev/null || true
 docker run -d \
   --name ember-control-plane \
-  -p 127.0.0.1:8080:8080 \
+  -p 0.0.0.0:8080:8080 \
   -e EMBER_BIND_ADDR=0.0.0.0:8080 \
   -e EMBER_DB_URL='sqlite:///data/ember.db?mode=rwc' \
-  -e EMBER_PUBLIC_BASE_URL='http://127.0.0.1:3000' \
+  -e EMBER_PUBLIC_BASE_URL="http://$(ipconfig getifaddr en0 2>/dev/null || hostname -I | awk '{print $1}'):3000" \
   -e RUST_LOG='info,sqlx=warn,tower_http=info' \
   -v "$PWD":/app \
   -v ember-db:/data \
@@ -220,7 +222,15 @@ Build the agent:
 cargo build -p ember-agent
 ```
 
-In the UI, go to `Hosts -> Add host` and copy the enrollment token. Then enroll a local development host:
+In the UI, go to `Hosts -> Add host` and copy the generated install command. From another homelab machine it will look like this:
+
+```bash
+curl -fsSL http://<ember-host-ip>:3000/install.sh | sudo NAME=$(hostname) sh -s -- --server http://<ember-host-ip>:3000 --token <TOKEN>
+```
+
+The installer is served by the Next.js app from `web/public/install.sh`. It installs `ember-agent` from `EMBER_AGENT_BIN_URL` when provided, or falls back to `cargo install --git https://github.com/jusso-dev/Ember.git ember-agent --locked --force --root /usr/local`.
+
+For local development without the installer, enroll a local development host manually:
 
 ```bash
 EMBER_AGENT_STATE_DIR=/tmp/ember-agent-dev1 \
@@ -296,9 +306,9 @@ docker exec ember-control-plane bash -lc 'export PATH=/usr/local/cargo/bin:$PATH
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `EMBER_BIND_ADDR` | `127.0.0.1:8080` | Address for the Rust API server. |
+| `EMBER_BIND_ADDR` | `0.0.0.0:8080` | Address for the Rust API server. |
 | `EMBER_DB_URL` | `sqlite://ember.db?mode=rwc` | SQLite database URL. The file is created on first boot. |
-| `EMBER_PUBLIC_BASE_URL` | `http://127.0.0.1:8080` | Base URL used when generating installer/invitation-style links. |
+| `EMBER_PUBLIC_BASE_URL` | `http://<detected-lan-ip>:3000` | Base URL used when generating installer/invitation-style links. |
 | `RUST_LOG` | `info,sqlx=warn,tower_http=info` | Optional tracing filter. |
 
 `EMBER_ADMIN_PASSWORD` is no longer used. Auth is user-backed and starts with first-run account creation.
@@ -308,6 +318,7 @@ docker exec ember-control-plane bash -lc 'export PATH=/usr/local/cargo/bin:$PATH
 | Variable | Default | Description |
 | --- | --- | --- |
 | `CONTROL_PLANE_URL` | `http://127.0.0.1:8080` | Destination for the Next.js `/api/*` rewrite. |
+| `HOST_IP` | auto-detected by `scripts/dev.sh` | Optional override for the LAN IP printed and used by the dev script. |
 
 ### Agent
 
@@ -379,7 +390,7 @@ exports TypeScript definitions into `web/lib/types/`.
 - Browser updates are polling-based, roughly every 2-3 seconds. There is no browser SSE/WebSocket push yet.
 - There is no log streaming.
 - There is no TLS termination in this repo. Put a reverse proxy in front for remote deployments.
-- There is no agent auto-update or installer implementation in this repository. The UI can generate an installer-style command using `EMBER_PUBLIC_BASE_URL`, but the actual `/install.sh` asset is not served by the current control plane.
+- The installer script is intentionally minimal. It can install from `EMBER_AGENT_BIN_URL` or fall back to `cargo install --git`; there are no official prebuilt release artifacts yet.
 
 ## Development Notes
 
