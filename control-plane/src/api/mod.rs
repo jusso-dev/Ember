@@ -24,22 +24,43 @@ pub fn router(state: AppState) -> Router {
         .route("/api/hosts", get(hosts::list))
         .route("/api/hosts/enroll-token", post(hosts::enroll_token))
         .route("/api/hosts/:id", get(hosts::get).delete(hosts::delete))
-        .route("/api/workloads", get(workloads::list).post(workloads::create))
+        .route("/api/hosts/:id/logs", get(logs::get_host_logs))
+        .route(
+            "/api/workloads",
+            get(workloads::list).post(workloads::create),
+        )
         .route("/api/workloads/:id", get(workloads::get))
         .route("/api/workloads/:id", delete(workloads::delete))
         .route("/api/workloads/:id/start", post(workloads::start))
         .route("/api/workloads/:id/stop", post(workloads::stop))
         .route("/api/workloads/:id/logs", get(logs::get_workload_logs))
+        .route(
+            "/api/workloads/:id/logs/stream",
+            get(logs::stream_workload_logs),
+        )
         .route("/api/volumes", get(volumes::list).post(volumes::create))
         .route("/api/volumes/:id", delete(volumes::delete))
         .route("/api/events", get(events::list))
         .route("/api/audit-logs", get(audit::list))
+        .route("/api/audit-logs/export", get(audit::export))
+        .route("/api/audit-logs/verify", get(audit::verify))
         .route("/api/control-plane/logs", get(logs::get_control_plane_logs))
         .route("/api/tenants/current", get(access::current))
-        .route("/api/tenants/current/invitations", post(access::create_invitation))
+        .route(
+            "/api/tenants/current/invitations",
+            post(access::create_invitation),
+        )
+        .route(
+            "/api/tenants/current/audit-webhooks",
+            post(access::create_audit_webhook),
+        )
         .route(
             "/api/tenants/current/invitations/:id",
             delete(access::delete_invitation),
+        )
+        .route(
+            "/api/tenants/current/audit-webhooks/:id",
+            delete(access::delete_audit_webhook),
         )
         .route(
             "/api/tenants/current/members/:id",

@@ -1,12 +1,12 @@
 use crate::auth::{bearer_token, sha256_hex};
 use crate::error::AppError;
 use crate::scheduler;
-use crate::state::AppState;
+use crate::state::{AppState, StreamLogEvent};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
 use axum::response::Response;
 use chrono::Utc;
-use ember_shared::protocol::{AgentMsg, ServerMsg};
+use ember_shared::protocol::{AgentLogLine, AgentMsg, LogLine, ServerMsg};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -69,7 +69,15 @@ async fn handle_socket(state: AppState, host_id: String, socket: WebSocket) {
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerMsg>();
     state.registry.insert(host_id.clone(), tx).await;
     mark_online(&state, &host_id, None, None, None).await;
-    log_event(&state, Some(&host_id), None, None, "agent.connect", "agent connected").await;
+    log_event(
+        &state,
+        Some(&host_id),
+        None,
+        None,
+        "agent.connect",
+        "agent connected",
+    )
+    .await;
 
     let (mut ws_tx, mut ws_rx) = socket.split();
 
@@ -123,13 +131,28 @@ async fn handle_socket(state: AppState, host_id: String, socket: WebSocket) {
     state.registry.remove(&host_id).await;
     writer.abort();
     mark_offline(&state, &host_id).await;
-    log_event(&state, Some(&host_id), None, None, "agent.disconnect", "agent disconnected").await;
+    log_event(
+        &state,
+        Some(&host_id),
+        None,
+        None,
+        "agent.disconnect",
+        "agent disconnected",
+    )
+    .await;
 }
 
 async fn handle_agent_msg(state: &AppState, host_id: &str, msg: AgentMsg) -> anyhow::Result<()> {
     match msg {
         AgentMsg::Hello(h) => {
-            mark_online(state, host_id, Some(&h.os), Some(&h.arch), Some(&h.agent_version)).await;
+            mark_online(
+                state,
+                host_id,
+                Some(&h.os),
+                Some(&h.arch),
+                Some(&h.agent_version),
+            )
+            .await;
             reconcile_observed(state, host_id, &h.containers).await;
         }
         AgentMsg::Ping { containers } => {
@@ -146,6 +169,30 @@ async fn handle_agent_msg(state: &AppState, host_id: &str, msg: AgentMsg) -> any
             } else {
                 tracing::debug!(task_id = %task_id, "logs result with no pending request");
             }
+        }
+        AgentMsg::LogChunk {
+            subscription_id,
+            workload_id,
+            lines,
+        } => {
+            persist_workload_log_chunk(state, host_id, &workload_id, &lines).await;
+            let _ = state
+                .pending_log_streams
+                .send(&subscription_id, StreamLogEvent::Lines(lines))
+                .await;
+        }
+        AgentMsg::LogStreamEnded {
+            subscription_id,
+            reason,
+        } => {
+            let _ = state
+                .pending_log_streams
+                .send(&subscription_id, StreamLogEvent::Ended(reason))
+                .await;
+            let _ = state.pending_log_streams.take(&subscription_id).await;
+        }
+        AgentMsg::AgentLogs { batch } => {
+            persist_agent_logs(state, host_id, &batch).await;
         }
     }
     Ok(())
@@ -223,14 +270,13 @@ async fn reconcile_observed(
             Some(c) => (c.state.clone(), c.container_id.clone()),
             None => ("absent".to_string(), None),
         };
-        let _ = sqlx::query(
-            "UPDATE workloads SET observed_state = ?, container_id = ? WHERE id = ?",
-        )
-        .bind(&observed)
-        .bind(container_id.as_deref())
-        .bind(&id)
-        .execute(&state.pool)
-        .await;
+        let _ =
+            sqlx::query("UPDATE workloads SET observed_state = ?, container_id = ? WHERE id = ?")
+                .bind(&observed)
+                .bind(container_id.as_deref())
+                .bind(&id)
+                .execute(&state.pool)
+                .await;
         let _ = name; // unused; we keyed by id-derived container_name
     }
 }
@@ -249,14 +295,159 @@ pub async fn log_event(
     kind: &str,
     message: &str,
 ) {
+    let tenant_id: Option<String> = if let Some(workload_id) = workload_id {
+        sqlx::query_as::<_, (Option<String>,)>("SELECT tenant_id FROM workloads WHERE id = ?")
+            .bind(workload_id)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.0)
+    } else if let Some(volume_id) = volume_id {
+        sqlx::query_as::<_, (Option<String>,)>("SELECT tenant_id FROM volumes WHERE id = ?")
+            .bind(volume_id)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.0)
+    } else if let Some(host_id) = host_id {
+        sqlx::query_as::<_, (Option<String>,)>("SELECT tenant_id FROM hosts WHERE id = ?")
+            .bind(host_id)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|row| row.0)
+    } else {
+        None
+    };
     let _ = sqlx::query(
-        "INSERT INTO events (host_id, workload_id, volume_id, kind, message) VALUES (?,?,?,?,?)",
+        "INSERT INTO events (host_id, workload_id, volume_id, kind, message, tenant_id) VALUES (?,?,?,?,?,?)",
     )
     .bind(host_id)
     .bind(workload_id)
     .bind(volume_id)
     .bind(kind)
     .bind(message)
+    .bind(tenant_id)
     .execute(&state.pool)
     .await;
+}
+
+async fn persist_workload_log_chunk(
+    state: &AppState,
+    host_id: &str,
+    workload_id: &str,
+    lines: &[LogLine],
+) {
+    if lines.is_empty() {
+        return;
+    }
+    let row: Option<(String,)> = match sqlx::query_as(
+        "SELECT tenant_id FROM workloads WHERE id = ? AND host_id = ?",
+    )
+    .bind(workload_id)
+    .bind(host_id)
+    .fetch_optional(&state.pool)
+    .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = ?e, %workload_id, "workload log chunk tenant lookup failed");
+            return;
+        }
+    };
+    let Some((tenant_id,)) = row else { return };
+    let mut tx = match state.pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = ?e, "workload log chunk persistence begin failed");
+            return;
+        }
+    };
+    for line in lines {
+        let ts = line
+            .timestamp
+            .as_deref()
+            .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+            .map(|value| value.with_timezone(&Utc))
+            .unwrap_or_else(Utc::now);
+        if let Err(e) = sqlx::query(
+            "INSERT INTO workload_logs (tenant_id, workload_id, host_id, ts, stream, message) \
+             VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&tenant_id)
+        .bind(workload_id)
+        .bind(host_id)
+        .bind(ts)
+        .bind(&line.stream)
+        .bind(&line.message)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = ?e, "workload log chunk insert failed");
+        }
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = ?e, "workload log chunk commit failed");
+    }
+}
+
+async fn persist_agent_logs(state: &AppState, host_id: &str, batch: &[AgentLogLine]) {
+    if batch.is_empty() {
+        return;
+    }
+    let row: Option<(String,)> = match sqlx::query_as("SELECT tenant_id FROM hosts WHERE id = ?")
+        .bind(host_id)
+        .fetch_optional(&state.pool)
+        .await
+    {
+        Ok(row) => row,
+        Err(e) => {
+            tracing::error!(error = ?e, %host_id, "agent log tenant lookup failed");
+            return;
+        }
+    };
+    let Some((tenant_id,)) = row else { return };
+    let mut tx = match state.pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            tracing::error!(error = ?e, "agent log persistence begin failed");
+            return;
+        }
+    };
+    for line in batch {
+        let ts = chrono::DateTime::parse_from_rfc3339(&line.ts)
+            .map(|value| value.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+        if let Err(e) = sqlx::query(
+            "INSERT INTO agent_logs (tenant_id, host_id, ts, level, target, message) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&tenant_id)
+        .bind(host_id)
+        .bind(ts)
+        .bind(&line.level)
+        .bind(&line.target)
+        .bind(&line.message)
+        .execute(&mut *tx)
+        .await
+        {
+            tracing::error!(error = ?e, "agent log insert failed");
+        }
+        if line.level == "ERROR" && line.message.to_lowercase().contains("panic") {
+            log_event(
+                state,
+                Some(host_id),
+                None,
+                None,
+                "host.agent.crash",
+                &line.message,
+            )
+            .await;
+        }
+    }
+    if let Err(e) = tx.commit().await {
+        tracing::error!(error = ?e, "agent log commit failed");
+    }
 }

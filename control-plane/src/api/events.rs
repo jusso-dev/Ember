@@ -16,7 +16,7 @@ pub struct EventsQuery {
 }
 
 pub async fn list(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
     Query(q): Query<EventsQuery>,
 ) -> Result<Json<Vec<EventRow>>, AppError> {
@@ -31,11 +31,13 @@ pub async fn list(
         String,
     )> = sqlx::query_as(
         "SELECT id, ts, host_id, workload_id, volume_id, kind, message FROM events \
-         WHERE (? IS NULL OR host_id = ?) \
+         WHERE tenant_id = ? \
+           AND (? IS NULL OR host_id = ?) \
            AND (? IS NULL OR workload_id = ?) \
            AND (? IS NULL OR volume_id = ?) \
          ORDER BY id DESC LIMIT ?",
     )
+    .bind(&admin.tenant.id)
     .bind(&q.host_id)
     .bind(&q.host_id)
     .bind(&q.workload_id)

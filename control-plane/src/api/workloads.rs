@@ -15,7 +15,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 pub async fn list(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<WorkloadSummary>>, AppError> {
     let rows: Vec<(
@@ -33,8 +33,10 @@ pub async fn list(
         "SELECT w.id, w.name, w.host_id, h.name, w.image, w.desired_state, w.observed_state, \
          w.container_id, w.last_error, w.created_at \
          FROM workloads w JOIN hosts h ON h.id = w.host_id \
+         WHERE w.tenant_id = ? \
          ORDER BY w.created_at DESC",
     )
+    .bind(&admin.tenant.id)
     .fetch_all(&state.pool)
     .await?;
     let out = rows
@@ -56,7 +58,7 @@ pub async fn list(
 }
 
 pub async fn get(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<WorkloadSummary>, AppError> {
@@ -74,9 +76,10 @@ pub async fn get(
     )> = sqlx::query_as(
         "SELECT w.id, w.name, w.host_id, h.name, w.image, w.desired_state, w.observed_state, \
          w.container_id, w.last_error, w.created_at \
-         FROM workloads w JOIN hosts h ON h.id = w.host_id WHERE w.id = ?",
+         FROM workloads w JOIN hosts h ON h.id = w.host_id WHERE w.id = ? AND w.tenant_id = ?",
     )
     .bind(&id)
+    .bind(&admin.tenant.id)
     .fetch_optional(&state.pool)
     .await?;
     let t = row.ok_or(AppError::NotFound)?;
@@ -106,20 +109,23 @@ pub async fn create(
 
     // Validate host exists.
     let host_row: Option<(String, String)> =
-        sqlx::query_as("SELECT id, name FROM hosts WHERE id = ?")
+        sqlx::query_as("SELECT id, name FROM hosts WHERE id = ? AND tenant_id = ?")
             .bind(&req.host_id)
+            .bind(&admin.tenant.id)
             .fetch_optional(&state.pool)
             .await?;
-    let (host_id, host_name) = host_row.ok_or_else(|| AppError::BadRequest("host not found".into()))?;
+    let (host_id, host_name) =
+        host_row.ok_or_else(|| AppError::BadRequest("host not found".into()))?;
 
     // Resolve volume host paths (must be ready).
     let mut mounts: Vec<MountSpec> = Vec::with_capacity(req.volumes.len());
     for att in &req.volumes {
         let vol: Option<(String, String, Option<String>)> = sqlx::query_as(
-            "SELECT id, status, host_path FROM volumes WHERE id = ? AND host_id = ?",
+            "SELECT id, status, host_path FROM volumes WHERE id = ? AND host_id = ? AND tenant_id = ?",
         )
         .bind(&att.volume_id)
         .bind(&host_id)
+        .bind(&admin.tenant.id)
         .fetch_optional(&state.pool)
         .await?;
         let (_, status, host_path) =
@@ -130,8 +136,8 @@ pub async fn create(
                 att.volume_id, status
             )));
         }
-        let host_path = host_path
-            .ok_or_else(|| AppError::BadRequest("volume host_path not set".into()))?;
+        let host_path =
+            host_path.ok_or_else(|| AppError::BadRequest("volume host_path not set".into()))?;
         mounts.push(MountSpec {
             host_path,
             container_path: att.mount_path.clone(),
@@ -142,11 +148,14 @@ pub async fn create(
     let workload_id = Uuid::now_v7().to_string();
     let env_json = serde_json::to_string(&req.env).unwrap();
     let ports_json = serde_json::to_string(&req.ports).unwrap();
-    let command_json = req.command.as_ref().map(|c| serde_json::to_string(c).unwrap());
+    let command_json = req
+        .command
+        .as_ref()
+        .map(|c| serde_json::to_string(c).unwrap());
 
     sqlx::query(
-        "INSERT INTO workloads (id, name, host_id, image, env_json, ports_json, command_json, desired_state, observed_state) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'running', 'pending')",
+        "INSERT INTO workloads (id, name, host_id, image, env_json, ports_json, command_json, desired_state, observed_state, tenant_id) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'running', 'pending', ?)",
     )
     .bind(&workload_id)
     .bind(&req.name)
@@ -155,6 +164,7 @@ pub async fn create(
     .bind(&env_json)
     .bind(&ports_json)
     .bind(command_json.as_deref())
+    .bind(&admin.tenant.id)
     .execute(&state.pool)
     .await
     .map_err(|e| match e {
@@ -240,28 +250,26 @@ pub async fn start(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
-    let row: Option<(String, String, String, Option<String>)> = sqlx::query_as(
-        "SELECT host_id, image, env_json, command_json FROM workloads WHERE id = ?",
+    let row: Option<(String, String, String, String, Option<String>, String)> = sqlx::query_as(
+        "SELECT host_id, name, image, env_json, command_json, ports_json FROM workloads WHERE id = ? AND tenant_id = ?",
     )
     .bind(&id)
+    .bind(&admin.tenant.id)
     .fetch_optional(&state.pool)
     .await?;
-    let (host_id, image, env_json, command_json) = row.ok_or(AppError::NotFound)?;
+    let (host_id, name, image, env_json, command_json, ports_json) =
+        row.ok_or(AppError::NotFound)?;
+    let snapshot = workload_audit_snapshot(&id, &name, &host_id, &image, &env_json, &ports_json);
     let env: Vec<(String, String)> = serde_json::from_str(&env_json).unwrap_or_default();
-    let ports_json: Option<(String,)> =
-        sqlx::query_as("SELECT ports_json FROM workloads WHERE id = ?")
-            .bind(&id)
-            .fetch_optional(&state.pool)
-            .await?;
-    let ports: Vec<ember_shared::protocol::PortMapping> = ports_json
-        .and_then(|(s,)| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
+    let ports: Vec<ember_shared::protocol::PortMapping> =
+        serde_json::from_str(&ports_json).unwrap_or_default();
     let command: Option<Vec<String>> = command_json.and_then(|s| serde_json::from_str(&s).ok());
 
     let mounts = fetch_mounts(&state, &id, &host_id).await?;
 
-    sqlx::query("UPDATE workloads SET desired_state='running' WHERE id = ?")
+    sqlx::query("UPDATE workloads SET desired_state='running' WHERE id = ? AND tenant_id = ?")
         .bind(&id)
+        .bind(&admin.tenant.id)
         .execute(&state.pool)
         .await?;
 
@@ -274,9 +282,15 @@ pub async fn start(
         mounts,
         command,
     };
-    let _ = scheduler::enqueue(&state, &host_id, Some(&id), None, &Command::RunContainer(spec))
-        .await
-        .map_err(AppError::Anyhow)?;
+    let _ = scheduler::enqueue(
+        &state,
+        &host_id,
+        Some(&id),
+        None,
+        &Command::RunContainer(spec),
+    )
+    .await
+    .map_err(AppError::Anyhow)?;
     audit::record(
         &state,
         &AuditActor::from_admin(&admin, &headers),
@@ -284,7 +298,7 @@ pub async fn start(
         Some("workload"),
         Some(&id),
         RESULT_SUCCESS,
-        None,
+        Some(snapshot),
     )
     .await;
     Ok(axum::http::StatusCode::ACCEPTED)
@@ -296,13 +310,17 @@ pub async fn stop(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT host_id FROM workloads WHERE id = ?")
+    let row: Option<(String, String, String, String, String)> =
+        sqlx::query_as("SELECT host_id, name, image, env_json, ports_json FROM workloads WHERE id = ? AND tenant_id = ?")
         .bind(&id)
+        .bind(&admin.tenant.id)
         .fetch_optional(&state.pool)
         .await?;
-    let (host_id,) = row.ok_or(AppError::NotFound)?;
-    sqlx::query("UPDATE workloads SET desired_state='stopped' WHERE id = ?")
+    let (host_id, name, image, env_json, ports_json) = row.ok_or(AppError::NotFound)?;
+    let snapshot = workload_audit_snapshot(&id, &name, &host_id, &image, &env_json, &ports_json);
+    sqlx::query("UPDATE workloads SET desired_state='stopped' WHERE id = ? AND tenant_id = ?")
         .bind(&id)
+        .bind(&admin.tenant.id)
         .execute(&state.pool)
         .await?;
     let _ = scheduler::enqueue(
@@ -324,7 +342,7 @@ pub async fn stop(
         Some("workload"),
         Some(&id),
         RESULT_SUCCESS,
-        None,
+        Some(snapshot),
     )
     .await;
     Ok(axum::http::StatusCode::ACCEPTED)
@@ -336,13 +354,17 @@ pub async fn delete(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
-    let row: Option<(String,)> = sqlx::query_as("SELECT host_id FROM workloads WHERE id = ?")
+    let row: Option<(String, String, String, String, String)> =
+        sqlx::query_as("SELECT host_id, name, image, env_json, ports_json FROM workloads WHERE id = ? AND tenant_id = ?")
         .bind(&id)
+        .bind(&admin.tenant.id)
         .fetch_optional(&state.pool)
         .await?;
-    let (host_id,) = row.ok_or(AppError::NotFound)?;
-    sqlx::query("UPDATE workloads SET desired_state='removed' WHERE id = ?")
+    let (host_id, name, image, env_json, ports_json) = row.ok_or(AppError::NotFound)?;
+    let snapshot = workload_audit_snapshot(&id, &name, &host_id, &image, &env_json, &ports_json);
+    sqlx::query("UPDATE workloads SET desired_state='removed' WHERE id = ? AND tenant_id = ?")
         .bind(&id)
+        .bind(&admin.tenant.id)
         .execute(&state.pool)
         .await?;
     let _ = scheduler::enqueue(
@@ -364,7 +386,7 @@ pub async fn delete(
         Some("workload"),
         Some(&id),
         RESULT_SUCCESS,
-        None,
+        Some(snapshot),
     )
     .await;
     Ok(axum::http::StatusCode::ACCEPTED)
@@ -394,4 +416,27 @@ async fn fetch_mounts(
         });
     }
     Ok(out)
+}
+
+fn workload_audit_snapshot(
+    id: &str,
+    name: &str,
+    host_id: &str,
+    image: &str,
+    env_json: &str,
+    ports_json: &str,
+) -> serde_json::Value {
+    let env: Vec<(String, String)> = serde_json::from_str(env_json).unwrap_or_default();
+    let ports: Vec<ember_shared::protocol::PortMapping> =
+        serde_json::from_str(ports_json).unwrap_or_default();
+    serde_json::json!({
+        "before": {
+            "id": id,
+            "name": name,
+            "host_id": host_id,
+            "image": image,
+            "env_keys": env.into_iter().map(|(key, _)| key).collect::<Vec<_>>(),
+            "ports": ports,
+        }
+    })
 }

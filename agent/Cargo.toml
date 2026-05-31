@@ -20,4 +20,5 @@ serde_json.workspace = true
 reqwest.workspace = true
 bollard.workspace = true
 futures-util.workspace = true
+chrono.workspace = true
 ember-shared.workspace = true

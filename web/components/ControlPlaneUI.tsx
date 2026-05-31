@@ -17,6 +17,8 @@ const stateTone: Record<string, string> = {
   queued: 'border-amber-500/25 bg-amber-500/10 text-amber-300',
   deleting: 'border-amber-500/25 bg-amber-500/10 text-amber-300',
   error: 'border-red-500/25 bg-red-500/10 text-red-300',
+  denied: 'border-red-500/25 bg-red-500/10 text-red-300',
+  failure: 'border-red-500/25 bg-red-500/10 text-red-300',
   offline: 'border-zinc-600 bg-zinc-800/60 text-zinc-300',
   stopped: 'border-zinc-600 bg-zinc-800/60 text-zinc-300',
   owner: 'border-sky-500/25 bg-sky-500/10 text-sky-300',

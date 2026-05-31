@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   EmptyState,
   PageHeader,
@@ -12,7 +12,9 @@ import {
   panelClass,
 } from '@/components/ControlPlaneUI';
 import { api } from '@/lib/api';
+import type { AuditLogListResponse } from '@/lib/types/AuditLogListResponse';
 import type { AuditLogRow } from '@/lib/types/AuditLogRow';
+import type { AuditVerifyResponse } from '@/lib/types/AuditVerifyResponse';
 
 export default function AuditLogPage() {
   return <AuditLog />;
@@ -21,19 +23,50 @@ export default function AuditLogPage() {
 function AuditLog() {
   const [items, setItems] = useState<AuditLogRow[]>([]);
   const [query, setQuery] = useState('');
-  const [resultFilter, setResultFilter] = useState<'all' | 'success' | 'failure'>('all');
+  const [resultFilter, setResultFilter] = useState<'all' | 'success' | 'failure' | 'denied'>('all');
   const [actionFilter, setActionFilter] = useState<string>('all');
+  const [from, setFrom] = useState(defaultFrom());
+  const [to, setTo] = useState('');
+  const [nextCursor, setNextCursor] = useState<bigint | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [verify, setVerify] = useState<AuditVerifyResponse | null>(null);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const downloadRef = useRef<HTMLAnchorElement>(null);
+
+  function params(cursor?: bigint | null) {
+    const params = new URLSearchParams();
+    params.set('limit', '200');
+    if (resultFilter !== 'all') params.set('result', resultFilter);
+    if (actionFilter !== 'all') params.set('action', actionFilter);
+    if (from) params.set('since', new Date(from).toISOString());
+    if (to) params.set('until', new Date(to).toISOString());
+    if (cursor) params.set('before_id', String(cursor));
+    return params;
+  }
 
   function reload() {
     api
-      .get<AuditLogRow[]>('/api/audit-logs?limit=500')
-      .then((rows) => {
-        setItems(rows);
+      .get<AuditLogListResponse>(`/api/audit-logs?${params().toString()}`)
+      .then((response) => {
+        setItems(response.rows);
+        setNextCursor(response.next_cursor);
         setLoadError(null);
       })
       .catch((err) => setLoadError(String(err)));
+  }
+
+  function loadOlder() {
+    if (!nextCursor) return;
+    setLoadingOlder(true);
+    api
+      .get<AuditLogListResponse>(`/api/audit-logs?${params(nextCursor).toString()}`)
+      .then((response) => {
+        setItems((current) => [...current, ...response.rows]);
+        setNextCursor(response.next_cursor);
+      })
+      .catch((err) => setLoadError(String(err)))
+      .finally(() => setLoadingOlder(false));
   }
 
   useEffect(() => {
@@ -41,7 +74,27 @@ function AuditLog() {
     if (!autoRefresh) return;
     const t = setInterval(reload, 5000);
     return () => clearInterval(t);
-  }, [autoRefresh]);
+  }, [autoRefresh, resultFilter, actionFilter, from, to]);
+
+  function exportRows(format: 'csv' | 'jsonl') {
+    const exportParams = params();
+    exportParams.delete('limit');
+    exportParams.delete('before_id');
+    exportParams.set('format', format);
+    const href = `/api/audit-logs/export?${exportParams.toString()}`;
+    if (downloadRef.current) {
+      downloadRef.current.href = href;
+      downloadRef.current.download = format === 'csv' ? 'ember-audit.csv' : 'ember-audit.jsonl';
+      downloadRef.current.click();
+    }
+  }
+
+  function verifyChain() {
+    api
+      .get<AuditVerifyResponse>('/api/audit-logs/verify')
+      .then(setVerify)
+      .catch((err) => setLoadError(String(err)));
+  }
 
   const actions = useMemo(() => {
     const seen = new Set<string>();
@@ -70,7 +123,8 @@ function AuditLog() {
   });
 
   const successCount = items.filter((row) => row.result === 'success').length;
-  const failureCount = items.length - successCount;
+  const deniedCount = items.filter((row) => row.result === 'denied').length;
+  const failureCount = items.filter((row) => row.result === 'failure').length;
   const distinctActors = new Set(items.map((row) => row.actor_user_id ?? row.actor_email).filter(Boolean)).size;
 
   return (
@@ -86,17 +140,44 @@ function AuditLog() {
         <button type="button" onClick={reload} className={buttonSecondaryClass}>
           Refresh
         </button>
+        <button type="button" onClick={verifyChain} className={buttonSecondaryClass}>
+          Verify chain
+        </button>
+        <button type="button" onClick={() => exportRows('csv')} className={buttonSecondaryClass}>
+          Export CSV
+        </button>
+        <button type="button" onClick={() => exportRows('jsonl')} className={buttonSecondaryClass}>
+          Export JSONL
+        </button>
+        <a ref={downloadRef} className="hidden" />
       </PageHeader>
 
       <div className="grid gap-3 sm:grid-cols-4">
         <MiniStat label="Records" value={items.length} />
         <MiniStat label="Successes" value={successCount} />
         <MiniStat label="Failures" value={failureCount} tone={failureCount > 0 ? 'bad' : 'muted'} />
-        <MiniStat label="Distinct actors" value={distinctActors} />
+        <MiniStat label="Denied" value={deniedCount} tone={deniedCount > 0 ? 'bad' : 'muted'} />
       </div>
 
+      {verify && (
+        <div
+          className={`${panelClass} flex flex-col gap-2 p-4 text-sm sm:flex-row sm:items-center sm:justify-between`}
+        >
+          <div>
+            <div className="font-medium text-zinc-100">
+              Audit chain {verify.verified ? 'verified' : 'failed verification'}
+            </div>
+            <div className="mt-1 text-xs text-zinc-500">
+              Last verified row {verify.last_verified_id ?? 'none'}
+              {verify.first_bad_id ? `, first bad row ${verify.first_bad_id}` : ''}
+            </div>
+          </div>
+          <StatusBadge state={verify.verified ? 'ok' : 'error'} />
+        </div>
+      )}
+
       <div className={`${panelClass} overflow-hidden`}>
-        <div className="grid gap-3 border-b border-zinc-800 p-3 sm:grid-cols-[1fr_auto_auto]">
+        <div className="grid gap-3 border-b border-zinc-800 p-3 lg:grid-cols-[1fr_11rem_11rem_12rem_12rem]">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -117,13 +198,46 @@ function AuditLog() {
           </select>
           <select
             value={resultFilter}
-            onChange={(e) => setResultFilter(e.target.value as 'all' | 'success' | 'failure')}
+            onChange={(e) => setResultFilter(e.target.value as 'all' | 'success' | 'failure' | 'denied')}
             className={inputClass}
           >
             <option value="all">Any result</option>
             <option value="success">Success only</option>
             <option value="failure">Failures only</option>
+            <option value="denied">Denied only</option>
           </select>
+          <input
+            type="datetime-local"
+            value={from}
+            onChange={(e) => setFrom(e.target.value)}
+            className={inputClass}
+            aria-label="From"
+          />
+          <input
+            type="datetime-local"
+            value={to}
+            onChange={(e) => setTo(e.target.value)}
+            className={inputClass}
+            aria-label="Until"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-3 py-2">
+          {(['all', 'success', 'failure', 'denied'] as const).map((result) => (
+            <button
+              key={result}
+              type="button"
+              onClick={() => setResultFilter(result)}
+              className={`rounded-full border px-3 py-1 text-xs transition ${
+                resultFilter === result
+                  ? 'border-sky-500/40 bg-sky-500/10 text-sky-200'
+                  : 'border-zinc-800 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200'
+              }`}
+            >
+              {result === 'all' ? 'All' : result}
+            </button>
+          ))}
+          <span className="ml-auto text-xs text-zinc-600">{distinctActors} distinct actors</span>
         </div>
 
         {loadError && (
@@ -192,7 +306,7 @@ function AuditLog() {
                   )}
                 </td>
                 <td className="px-4 py-2">
-                  <StatusBadge state={row.result === 'success' ? 'ok' : 'error'} />
+                  <StatusBadge state={row.result === 'success' ? 'ok' : row.result} />
                 </td>
                 <td className="px-4 py-2 text-xs text-zinc-400">
                   <div className="font-mono">{row.ip_address ?? '—'}</div>
@@ -218,9 +332,22 @@ function AuditLog() {
             ))}
           </tbody>
         </table>
+        {nextCursor && (
+          <div className="border-t border-zinc-800 p-3 text-center">
+            <button type="button" onClick={loadOlder} disabled={loadingOlder} className={buttonSecondaryClass}>
+              {loadingOlder ? 'Loading older...' : 'Load older'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function defaultFrom() {
+  const value = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  value.setSeconds(0, 0);
+  return value.toISOString().slice(0, 16);
 }
 
 function prettifyJson(value: string) {

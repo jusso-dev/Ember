@@ -22,6 +22,8 @@ pub async fn enqueue(
         // directly via the WebSocket registry from `api::logs`. This arm keeps
         // the match exhaustive in case of misuse.
         Command::FetchContainerLogs { .. } => "FetchContainerLogs",
+        Command::StreamContainerLogs { .. } => "StreamContainerLogs",
+        Command::CancelLogStream { .. } => "CancelLogStream",
         Command::Ping => "Ping",
     };
     let payload = serde_json::to_string(command)?;
@@ -78,11 +80,12 @@ pub async fn replay_queued(state: &AppState, host_id: &str) -> anyhow::Result<()
             )
             .await;
         if sent {
-            let _ = sqlx::query("UPDATE tasks SET status='dispatched', dispatched_at = ? WHERE id = ?")
-                .bind(Utc::now())
-                .bind(&task_id)
-                .execute(&state.pool)
-                .await;
+            let _ =
+                sqlx::query("UPDATE tasks SET status='dispatched', dispatched_at = ? WHERE id = ?")
+                    .bind(Utc::now())
+                    .bind(&task_id)
+                    .execute(&state.pool)
+                    .await;
         }
     }
     Ok(())
@@ -94,7 +97,11 @@ pub async fn record_result(
     host_id: &str,
     result: &TaskResultData,
 ) -> anyhow::Result<()> {
-    let status = if result.success { "succeeded" } else { "failed" };
+    let status = if result.success {
+        "succeeded"
+    } else {
+        "failed"
+    };
     let result_json = serde_json::to_string(result)?;
     sqlx::query(
         "UPDATE tasks SET status = ?, finished_at = ?, result_json = ?, error = ? WHERE id = ?",
@@ -113,7 +120,9 @@ pub async fn record_result(
             .bind(task_id)
             .fetch_optional(&state.pool)
             .await?;
-    let Some((wl, vol, kind)) = row else { return Ok(()); };
+    let Some((wl, vol, kind)) = row else {
+        return Ok(());
+    };
 
     if let Some(wl_id) = wl.as_deref() {
         if result.success {
@@ -126,7 +135,15 @@ pub async fn record_result(
                     .bind(wl_id)
                     .execute(&state.pool)
                     .await?;
-                    log_event(state, Some(host_id), Some(wl_id), None, "workload.running", "container started").await;
+                    log_event(
+                        state,
+                        Some(host_id),
+                        Some(wl_id),
+                        None,
+                        "workload.running",
+                        "container started",
+                    )
+                    .await;
                 }
                 "StopContainer" => {
                     sqlx::query(
@@ -135,25 +152,52 @@ pub async fn record_result(
                     .bind(wl_id)
                     .execute(&state.pool)
                     .await?;
-                    log_event(state, Some(host_id), Some(wl_id), None, "workload.stopped", "container stopped").await;
+                    log_event(
+                        state,
+                        Some(host_id),
+                        Some(wl_id),
+                        None,
+                        "workload.stopped",
+                        "container stopped",
+                    )
+                    .await;
                 }
                 "RemoveContainer" => {
                     sqlx::query("DELETE FROM workloads WHERE id = ?")
                         .bind(wl_id)
                         .execute(&state.pool)
                         .await?;
-                    log_event(state, Some(host_id), Some(wl_id), None, "workload.removed", "workload removed").await;
+                    log_event(
+                        state,
+                        Some(host_id),
+                        Some(wl_id),
+                        None,
+                        "workload.removed",
+                        "workload removed",
+                    )
+                    .await;
                 }
                 _ => {}
             }
         } else {
-            let msg = result.message.clone().unwrap_or_else(|| "unknown error".into());
+            let msg = result
+                .message
+                .clone()
+                .unwrap_or_else(|| "unknown error".into());
             sqlx::query("UPDATE workloads SET observed_state='error', last_error=? WHERE id = ?")
                 .bind(&msg)
                 .bind(wl_id)
                 .execute(&state.pool)
                 .await?;
-            log_event(state, Some(host_id), Some(wl_id), None, "workload.error", &msg).await;
+            log_event(
+                state,
+                Some(host_id),
+                Some(wl_id),
+                None,
+                "workload.error",
+                &msg,
+            )
+            .await;
         }
     }
 
@@ -166,24 +210,51 @@ pub async fn record_result(
                         .bind(vol_id)
                         .execute(&state.pool)
                         .await?;
-                    log_event(state, Some(host_id), None, Some(vol_id), "volume.ready", "volume provisioned").await;
+                    log_event(
+                        state,
+                        Some(host_id),
+                        None,
+                        Some(vol_id),
+                        "volume.ready",
+                        "volume provisioned",
+                    )
+                    .await;
                 }
                 "DeleteVolume" => {
                     sqlx::query("DELETE FROM volumes WHERE id = ?")
                         .bind(vol_id)
                         .execute(&state.pool)
                         .await?;
-                    log_event(state, Some(host_id), None, Some(vol_id), "volume.deleted", "volume deleted").await;
+                    log_event(
+                        state,
+                        Some(host_id),
+                        None,
+                        Some(vol_id),
+                        "volume.deleted",
+                        "volume deleted",
+                    )
+                    .await;
                 }
                 _ => {}
             }
         } else {
-            let msg = result.message.clone().unwrap_or_else(|| "unknown error".into());
+            let msg = result
+                .message
+                .clone()
+                .unwrap_or_else(|| "unknown error".into());
             sqlx::query("UPDATE volumes SET status='error' WHERE id = ?")
                 .bind(vol_id)
                 .execute(&state.pool)
                 .await?;
-            log_event(state, Some(host_id), None, Some(vol_id), "volume.error", &msg).await;
+            log_event(
+                state,
+                Some(host_id),
+                None,
+                Some(vol_id),
+                "volume.error",
+                &msg,
+            )
+            .await;
         }
     }
     Ok(())

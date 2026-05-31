@@ -1,4 +1,4 @@
-use crate::audit::{self, AuditActor, RESULT_SUCCESS};
+use crate::audit::{self, AuditActor, RESULT_DENIED, RESULT_SUCCESS};
 use crate::auth::{random_token, sha256_hex, AdminSession};
 use crate::error::AppError;
 use crate::state::AppState;
@@ -7,8 +7,8 @@ use axum::http::HeaderMap;
 use axum::Json;
 use chrono::{DateTime, Utc};
 use ember_shared::protocol::{
-    CreateTenantInvitationRequest, RolePermissionSummary, TenantAccessSummary,
-    TenantInvitationSummary, TenantMemberSummary,
+    AuditWebhookSummary, CreateAuditWebhookRequest, CreateTenantInvitationRequest,
+    RolePermissionSummary, TenantAccessSummary, TenantInvitationSummary, TenantMemberSummary,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -16,6 +16,7 @@ use uuid::Uuid;
 pub async fn current(
     admin: AdminSession,
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Result<Json<TenantAccessSummary>, AppError> {
     let members: Vec<(String, String, String, String, DateTime<Utc>)> = sqlx::query_as(
         "SELECT users.id, users.email, users.name, tenant_memberships.role, tenant_memberships.created_at \
@@ -36,6 +37,36 @@ pub async fn current(
     .bind(&admin.tenant.id)
     .fetch_all(&state.pool)
     .await?;
+
+    let webhooks: Vec<(
+        String,
+        String,
+        String,
+        i64,
+        Option<String>,
+        Option<DateTime<Utc>>,
+        DateTime<Utc>,
+    )> = sqlx::query_as(
+        "SELECT id, url, event_filter_json, failure_count, last_error, last_delivered_at, created_at \
+         FROM audit_webhooks WHERE tenant_id = ? ORDER BY created_at DESC",
+    )
+    .bind(&admin.tenant.id)
+    .fetch_all(&state.pool)
+    .await?;
+
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "access.read",
+        Some("tenant"),
+        Some(&admin.tenant.id),
+        RESULT_SUCCESS,
+        Some(json!({
+            "members_returned": members.len(),
+            "invitations_returned": invitations.len(),
+        })),
+    )
+    .await;
 
     Ok(Json(TenantAccessSummary {
         tenant: admin.tenant,
@@ -61,7 +92,94 @@ pub async fn current(
             })
             .collect(),
         role_matrix: role_matrix(),
+        audit_webhooks: webhooks
+            .into_iter()
+            .map(|row| AuditWebhookSummary {
+                id: row.0,
+                url: row.1,
+                event_filter: serde_json::from_str(&row.2).unwrap_or_default(),
+                failure_count: row.3.max(0) as u32,
+                last_error: row.4,
+                last_delivered_at: row.5.map(|value| value.to_rfc3339()),
+                created_at: row.6.to_rfc3339(),
+                secret_once: None,
+            })
+            .collect(),
     }))
+}
+
+pub async fn create_audit_webhook(
+    admin: AdminSession,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<CreateAuditWebhookRequest>,
+) -> Result<Json<AuditWebhookSummary>, AppError> {
+    require_access_admin(&state, &admin, &headers, "audit_webhook.create").await?;
+    if !(req.url.starts_with("https://") || req.url.starts_with("http://")) {
+        return Err(AppError::BadRequest(
+            "webhook URL must be http or https".into(),
+        ));
+    }
+    let id = Uuid::now_v7().to_string();
+    let secret = random_token(32);
+    let secret_hash = sha256_hex(&secret);
+    let event_filter_json =
+        serde_json::to_string(&req.event_filter).unwrap_or_else(|_| "[]".into());
+    sqlx::query(
+        "INSERT INTO audit_webhooks (id, tenant_id, url, secret_hash, event_filter_json) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(&admin.tenant.id)
+    .bind(&req.url)
+    .bind(&secret_hash)
+    .bind(&event_filter_json)
+    .execute(&state.pool)
+    .await?;
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "audit_webhook.create",
+        Some("audit_webhook"),
+        Some(&id),
+        RESULT_SUCCESS,
+        Some(json!({ "url": req.url, "event_filter": req.event_filter })),
+    )
+    .await;
+    Ok(Json(AuditWebhookSummary {
+        id,
+        url: req.url,
+        event_filter: req.event_filter,
+        failure_count: 0,
+        last_error: None,
+        last_delivered_at: None,
+        created_at: Utc::now().to_rfc3339(),
+        secret_once: Some(secret),
+    }))
+}
+
+pub async fn delete_audit_webhook(
+    admin: AdminSession,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<axum::http::StatusCode, AppError> {
+    require_access_admin(&state, &admin, &headers, "audit_webhook.delete").await?;
+    sqlx::query("DELETE FROM audit_webhooks WHERE id = ? AND tenant_id = ?")
+        .bind(&id)
+        .bind(&admin.tenant.id)
+        .execute(&state.pool)
+        .await?;
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "audit_webhook.delete",
+        Some("audit_webhook"),
+        Some(&id),
+        RESULT_SUCCESS,
+        None,
+    )
+    .await;
+    Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
 pub async fn create_invitation(
@@ -70,7 +188,7 @@ pub async fn create_invitation(
     headers: HeaderMap,
     Json(req): Json<CreateTenantInvitationRequest>,
 ) -> Result<Json<TenantInvitationSummary>, AppError> {
-    require_access_admin(&admin)?;
+    require_access_admin(&state, &admin, &headers, "access.invitation.create").await?;
     let email = super::auth::normalize_email(&req.email)?;
     validate_invite_role(&req.role)?;
 
@@ -139,7 +257,7 @@ pub async fn delete_invitation(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
-    require_access_admin(&admin)?;
+    require_access_admin(&state, &admin, &headers, "access.invitation.delete").await?;
     sqlx::query("DELETE FROM tenant_invitations WHERE id = ? AND tenant_id = ?")
         .bind(&id)
         .bind(&admin.tenant.id)
@@ -164,7 +282,7 @@ pub async fn remove_member(
     headers: HeaderMap,
     Path(user_id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
-    require_access_admin(&admin)?;
+    require_access_admin(&state, &admin, &headers, "access.member.remove").await?;
     if user_id == admin.user.id {
         return Err(AppError::BadRequest("you cannot remove yourself".into()));
     }
@@ -179,13 +297,16 @@ pub async fn remove_member(
         return Err(AppError::NotFound);
     };
     if target_role == "owner" {
-        let owners: (i64,) =
-            sqlx::query_as("SELECT COUNT(*) FROM tenant_memberships WHERE tenant_id = ? AND role = 'owner'")
-                .bind(&admin.tenant.id)
-                .fetch_one(&state.pool)
-                .await?;
+        let owners: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM tenant_memberships WHERE tenant_id = ? AND role = 'owner'",
+        )
+        .bind(&admin.tenant.id)
+        .fetch_one(&state.pool)
+        .await?;
         if owners.0 <= 1 {
-            return Err(AppError::BadRequest("tenant must keep at least one owner".into()));
+            return Err(AppError::BadRequest(
+                "tenant must keep at least one owner".into(),
+            ));
         }
     }
 
@@ -207,10 +328,27 @@ pub async fn remove_member(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-fn require_access_admin(admin: &AdminSession) -> Result<(), AppError> {
+async fn require_access_admin(
+    state: &AppState,
+    admin: &AdminSession,
+    headers: &HeaderMap,
+    action: &str,
+) -> Result<(), AppError> {
     match admin.tenant.role.as_str() {
         "owner" | "admin" => Ok(()),
-        _ => Err(AppError::Forbidden),
+        _ => {
+            audit::record(
+                state,
+                &AuditActor::from_admin(admin, headers),
+                action,
+                Some("tenant"),
+                Some(&admin.tenant.id),
+                RESULT_DENIED,
+                Some(json!({ "role": admin.tenant.role })),
+            )
+            .await;
+            Err(AppError::Forbidden)
+        }
     }
 }
 

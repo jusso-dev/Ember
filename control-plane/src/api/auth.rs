@@ -10,7 +10,9 @@ use axum::http::header::{COOKIE, SET_COOKIE};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
-use ember_shared::protocol::{CreateFirstUserRequest, LoginRequest, SessionInfo, TenantInfo, UserInfo};
+use ember_shared::protocol::{
+    CreateFirstUserRequest, LoginRequest, SessionInfo, TenantInfo, UserInfo,
+};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -101,7 +103,10 @@ pub async fn login(
     )
     .await;
     let mut out_headers = HeaderMap::new();
-    out_headers.insert(SET_COOKIE, session_cookie(&token, SESSION_TTL_SECS).parse().unwrap());
+    out_headers.insert(
+        SET_COOKIE,
+        session_cookie(&token, SESSION_TTL_SECS).parse().unwrap(),
+    );
     Ok((
         StatusCode::OK,
         out_headers,
@@ -134,7 +139,9 @@ pub async fn create_first_user(
         return Err(AppError::BadRequest("name is required".into()));
     }
     if body.password.len() < 8 {
-        return Err(AppError::BadRequest("password must be at least 8 characters".into()));
+        return Err(AppError::BadRequest(
+            "password must be at least 8 characters".into(),
+        ));
     }
     let tenant_name = if body.tenant_name.trim().is_empty() {
         format!("{name}'s tenant")
@@ -148,29 +155,27 @@ pub async fn create_first_user(
     let role = "owner".to_string();
     let password_hash = hash_password(&body.password).map_err(AppError::Anyhow)?;
     let mut tx = state.pool.begin().await?;
-    sqlx::query(
-        "INSERT INTO users (id, email, name, password_hash, role) VALUES (?, ?, ?, ?, ?)",
-    )
-    .bind(&id)
-    .bind(&email)
-    .bind(name)
-    .bind(&password_hash)
-    .bind(&role)
-    .execute(&mut *tx)
-    .await?;
+    sqlx::query("INSERT INTO users (id, email, name, password_hash, role) VALUES (?, ?, ?, ?, ?)")
+        .bind(&id)
+        .bind(&email)
+        .bind(name)
+        .bind(&password_hash)
+        .bind(&role)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("INSERT INTO tenants (id, name, slug, created_by) VALUES (?, ?, ?, ?)")
-    .bind(&tenant_id)
-    .bind(&tenant_name)
-    .bind(&tenant_slug)
-    .bind(&id)
-    .execute(&mut *tx)
-    .await?;
+        .bind(&tenant_id)
+        .bind(&tenant_name)
+        .bind(&tenant_slug)
+        .bind(&id)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query("INSERT INTO tenant_memberships (tenant_id, user_id, role) VALUES (?, ?, ?)")
-    .bind(&tenant_id)
-    .bind(&id)
-    .bind(&role)
-    .execute(&mut *tx)
-    .await?;
+        .bind(&tenant_id)
+        .bind(&id)
+        .bind(&role)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
 
     let (token, _exp) = create_session(&state.pool, &id, &tenant_id)
@@ -190,7 +195,10 @@ pub async fn create_first_user(
     )
     .await;
     let mut out_headers = HeaderMap::new();
-    out_headers.insert(SET_COOKIE, session_cookie(&token, SESSION_TTL_SECS).parse().unwrap());
+    out_headers.insert(
+        SET_COOKIE,
+        session_cookie(&token, SESSION_TTL_SECS).parse().unwrap(),
+    );
     Ok((
         StatusCode::CREATED,
         out_headers,
@@ -227,7 +235,16 @@ pub async fn logout(
         }
         let _ = destroy_session(&state.pool, &token).await;
     }
-    audit::record(&state, &actor, "auth.logout", None, None, RESULT_SUCCESS, None).await;
+    audit::record(
+        &state,
+        &actor,
+        "auth.logout",
+        None,
+        None,
+        RESULT_SUCCESS,
+        None,
+    )
+    .await;
     let mut out = HeaderMap::new();
     out.insert(SET_COOKIE, clear_session_cookie().parse().unwrap());
     let setup_required = users_count(&state.pool).await.unwrap_or(0) == 0;
@@ -243,10 +260,7 @@ pub async fn logout(
     ))
 }
 
-pub async fn session(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Json<SessionInfo> {
+pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> Json<SessionInfo> {
     let setup_required = users_count(&state.pool).await.unwrap_or(0) == 0;
     let Some(token) = read_cookie(&headers) else {
         return Json(SessionInfo {

@@ -1,7 +1,9 @@
-use crate::executor;
 use crate::state::{self, AgentState};
-use ember_shared::protocol::{AgentMsg, HelloPayload, ServerMsg};
+use crate::{docker, executor};
+use chrono::Utc;
+use ember_shared::protocol::{AgentLogLine, AgentMsg, Command, HelloPayload, ServerMsg};
 use futures_util::{SinkExt, StreamExt};
+use std::collections::HashMap;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::Message;
@@ -43,7 +45,8 @@ async fn connect_and_serve(s: &AgentState) -> anyhow::Result<()> {
         agent_version: state::agent_version(),
         containers,
     });
-    tx.send(Message::Text(serde_json::to_string(&hello)?)).await?;
+    tx.send(Message::Text(serde_json::to_string(&hello)?))
+        .await?;
 
     // Heartbeat ticker.
     let (out_tx, mut out_rx) = tokio::sync::mpsc::unbounded_channel::<AgentMsg>();
@@ -77,6 +80,8 @@ async fn connect_and_serve(s: &AgentState) -> anyhow::Result<()> {
         let _ = tx.close().await;
     });
 
+    let mut log_streams: HashMap<String, tokio::task::JoinHandle<()>> = HashMap::new();
+
     while let Some(frame) = rx.next().await {
         let text = match frame? {
             Message::Text(t) => t,
@@ -92,19 +97,66 @@ async fn connect_and_serve(s: &AgentState) -> anyhow::Result<()> {
         };
         match msg {
             ServerMsg::Pong => {}
-            ServerMsg::Command { task_id, command } => {
-                let tx_clone = out_tx.clone();
-                tokio::spawn(async move {
-                    let msg = executor::execute(task_id, &command).await;
-                    let _ = tx_clone.send(msg);
-                });
-            }
+            ServerMsg::Command { task_id, command } => match command {
+                Command::StreamContainerLogs {
+                    workload_id,
+                    name,
+                    subscription_id,
+                } => {
+                    let tx_clone = out_tx.clone();
+                    let stream_id = subscription_id.clone();
+                    let handle = tokio::spawn(async move {
+                        let _ = tx_clone.send(agent_log(
+                                "INFO",
+                                "ember_agent::logs",
+                                format!("starting log stream subscription={stream_id} workload={workload_id}"),
+                            ));
+                        docker::follow_container_logs(name, stream_id, workload_id, tx_clone).await;
+                    });
+                    log_streams.insert(subscription_id, handle);
+                    let _ = out_tx.send(executor::execute(task_id, &Command::Ping).await);
+                }
+                Command::CancelLogStream { subscription_id } => {
+                    if let Some(handle) = log_streams.remove(&subscription_id) {
+                        handle.abort();
+                    }
+                    let _ = out_tx.send(agent_log(
+                        "INFO",
+                        "ember_agent::logs",
+                        format!("cancelled log stream subscription={subscription_id}"),
+                    ));
+                    let _ = out_tx.send(executor::execute(task_id, &Command::Ping).await);
+                }
+                other => {
+                    let tx_clone = out_tx.clone();
+                    tokio::spawn(async move {
+                        let msg = executor::execute(task_id, &other).await;
+                        let _ = tx_clone.send(msg);
+                    });
+                }
+            },
         }
     }
 
+    for (_, handle) in log_streams {
+        handle.abort();
+    }
     hb_task.abort();
     writer.abort();
     Ok(())
+}
+
+fn agent_log(level: &str, target: &str, message: String) -> AgentMsg {
+    AgentMsg::AgentLogs {
+        batch: vec![AgentLogLine {
+            id: None,
+            host_id: String::new(),
+            ts: Utc::now().to_rfc3339(),
+            level: level.to_string(),
+            target: target.to_string(),
+            message,
+        }],
+    }
 }
 
 fn ws_url_from(server: &str) -> String {

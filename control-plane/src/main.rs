@@ -17,13 +17,14 @@ use tracing_subscriber::{prelude::*, EnvFilter};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let log_buffer = log_buffer::LogBuffer::new(5000);
+    let (persisted_log_tx, persisted_log_rx) = tokio::sync::mpsc::channel(4096);
     tracing_subscriber::registry()
         .with(
             EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| EnvFilter::new("info,sqlx=warn,tower_http=info")),
         )
         .with(tracing_subscriber::fmt::layer())
-        .with(log_buffer::BufferLayer::new(log_buffer.clone()))
+        .with(log_buffer::BufferLayer::new(log_buffer.clone()).with_persisted_tx(persisted_log_tx))
         .init();
 
     let cfg = config::Config::from_env()?;
@@ -34,9 +35,12 @@ async fn main() -> anyhow::Result<()> {
         tracing::warn!("EMBER_ADMIN_PASSWORD is ignored; use the first-run user setup flow");
     }
 
-    let app_state = state::AppState::new(pool.clone(), cfg.public_base_url.clone(), log_buffer);
+    let app_state = state::AppState::new(pool.clone(), &cfg, log_buffer);
 
+    tokio::spawn(log_buffer::persist_writer(pool.clone(), persisted_log_rx));
     tokio::spawn(reconciler::run(app_state.clone()));
+    tokio::spawn(reconciler::run_retention(app_state.clone()));
+    tokio::spawn(reconciler::run_audit_webhooks(app_state.clone()));
 
     let app = api::router(app_state);
 

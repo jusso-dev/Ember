@@ -1,6 +1,8 @@
 use crate::error::AppError;
 use crate::state::AppState;
-use argon2::password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::{
+    rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+};
 use argon2::Argon2;
 use axum::async_trait;
 use axum::extract::FromRequestParts;
@@ -50,13 +52,15 @@ pub async fn create_session(
 ) -> anyhow::Result<(String, DateTime<Utc>)> {
     let token = random_token(32);
     let expires = Utc::now() + chrono::Duration::seconds(SESSION_TTL_SECS);
-    sqlx::query("INSERT INTO sessions (token, user_id, active_tenant_id, expires_at) VALUES (?, ?, ?, ?)")
-        .bind(&token)
-        .bind(user_id)
-        .bind(active_tenant_id)
-        .bind(expires)
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO sessions (token, user_id, active_tenant_id, expires_at) VALUES (?, ?, ?, ?)",
+    )
+    .bind(&token)
+    .bind(user_id)
+    .bind(active_tenant_id)
+    .bind(expires)
+    .execute(pool)
+    .await?;
     Ok((token, expires))
 }
 
@@ -82,9 +86,8 @@ pub async fn session_identity(
         Option<String>,
         Option<String>,
         Option<String>,
-    )> =
-        sqlx::query_as(
-            r#"
+    )> = sqlx::query_as(
+        r#"
             SELECT sessions.expires_at,
                    users.id,
                    users.email,
@@ -103,10 +106,10 @@ pub async fn session_identity(
             WHERE sessions.token = ?
               AND users.disabled_at IS NULL
             "#,
-        )
-            .bind(token)
-            .fetch_optional(pool)
-            .await?;
+    )
+    .bind(token)
+    .fetch_optional(pool)
+    .await?;
     let Some((
         expires_at,
         Some(user_id),
@@ -117,7 +120,8 @@ pub async fn session_identity(
         Some(tenant_name),
         Some(tenant_slug),
         Some(tenant_role),
-    )) = row else {
+    )) = row
+    else {
         return Ok(None);
     };
     if expires_at <= Utc::now() {
@@ -147,9 +151,7 @@ pub async fn users_count(pool: &sqlx::SqlitePool) -> anyhow::Result<i64> {
 }
 
 pub fn session_cookie(token: &str, max_age_secs: i64) -> String {
-    format!(
-        "{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_secs}"
-    )
+    format!("{SESSION_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_secs}")
 }
 
 pub fn clear_session_cookie() -> String {
@@ -157,7 +159,11 @@ pub fn clear_session_cookie() -> String {
 }
 
 fn cookie_from_header(parts: &Parts) -> Option<String> {
-    let header = parts.headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
+    let header = parts
+        .headers
+        .get(axum::http::header::COOKIE)?
+        .to_str()
+        .ok()?;
     for pair in header.split(';') {
         let mut it = pair.trim().splitn(2, '=');
         let k = it.next()?;

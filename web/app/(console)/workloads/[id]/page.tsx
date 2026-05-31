@@ -29,9 +29,13 @@ function WorkloadDetail({ id }: { id: string }) {
   const [events, setEvents] = useState<EventRow[]>([]);
   const [logs, setLogs] = useState<WorkloadLogsResponse | null>(null);
   const [tail, setTail] = useState(200);
+  const [source, setSource] = useState<'live' | 'stored'>('live');
+  const [since, setSince] = useState('');
+  const [until, setUntil] = useState('');
   const [query, setQuery] = useState('');
   const [streamFilter, setStreamFilter] = useState<'all' | 'stdout' | 'stderr'>('all');
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [follow, setFollow] = useState(false);
   const [autoScroll, setAutoScroll] = useState(true);
   const [logError, setLogError] = useState<string | null>(null);
   const [workloadError, setWorkloadError] = useState<string | null>(null);
@@ -54,8 +58,16 @@ function WorkloadDetail({ id }: { id: string }) {
 
   function reloadLogs() {
     setLoadingLogs(true);
+    const params = new URLSearchParams();
+    params.set('tail', String(tail));
+    params.set('source', source);
+    if (source === 'stored') {
+      if (since) params.set('since', new Date(since).toISOString());
+      if (until) params.set('until', new Date(until).toISOString());
+      if (query) params.set('search', query);
+    }
     api
-      .get<WorkloadLogsResponse>(`/api/workloads/${id}/logs?tail=${tail}`)
+      .get<WorkloadLogsResponse>(`/api/workloads/${id}/logs?${params.toString()}`)
       .then((data) => {
         setLogs(data);
         setLogError(data.error ?? null);
@@ -73,7 +85,45 @@ function WorkloadDetail({ id }: { id: string }) {
       reloadLogs();
     }, 5000);
     return () => clearInterval(t);
-  }, [id, autoRefresh, tail]);
+  }, [id, autoRefresh, tail, source, since, until]);
+
+  useEffect(() => {
+    if (!follow || source !== 'live') return;
+    setAutoRefresh(false);
+    const es = new EventSource(`/api/workloads/${id}/logs/stream`, { withCredentials: true });
+    es.addEventListener('log', (event) => {
+      try {
+        const next = JSON.parse((event as MessageEvent).data) as LogLine[];
+        setLogs((current) => {
+          const base = current ?? {
+            workload_id: id,
+            host_id: workload?.host_id ?? '',
+            fetched_at: new Date().toISOString(),
+            lines: [],
+            truncated: false,
+            error: null,
+          };
+          return {
+            ...base,
+            fetched_at: new Date().toISOString(),
+            lines: [...base.lines, ...next].slice(-5000),
+          };
+        });
+        setLogError(null);
+      } catch (err) {
+        setLogError(String(err));
+      }
+    });
+    es.addEventListener('end', (event) => {
+      setLogError((event as MessageEvent).data || 'log stream ended');
+      setFollow(false);
+    });
+    es.onerror = () => {
+      setLogError('live log stream disconnected');
+      setFollow(false);
+    };
+    return () => es.close();
+  }, [follow, source, id, workload?.host_id]);
 
   useEffect(() => {
     if (!autoScroll || !scrollRef.current) return;
@@ -181,10 +231,18 @@ function WorkloadDetail({ id }: { id: string }) {
           <div>
             <h2 className="text-sm font-medium text-zinc-100">Container logs</h2>
             <p className="text-xs text-zinc-500">
-              Fetched on demand from the host agent over WebSocket.
+              Live output streams through the agent; stored output survives restarts until retention expires.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={source}
+              onChange={(e) => setSource(e.target.value as 'live' | 'stored')}
+              className={inputClass}
+            >
+              <option value="live">Live pull</option>
+              <option value="stored">Stored</option>
+            </select>
             <select
               value={tail}
               onChange={(e) => setTail(Number(e.target.value))}
@@ -212,6 +270,14 @@ function WorkloadDetail({ id }: { id: string }) {
             >
               {autoRefresh ? 'Pause' : 'Resume'}
             </button>
+            <button
+              type="button"
+              onClick={() => setFollow((value) => !value)}
+              disabled={source !== 'live'}
+              className={follow ? buttonPrimaryClass : buttonSecondaryClass}
+            >
+              {follow ? 'Following' : 'Follow'}
+            </button>
             <button type="button" onClick={reloadLogs} className={buttonSecondaryClass}>
               {loadingLogs ? 'Loading…' : 'Refresh'}
             </button>
@@ -224,6 +290,24 @@ function WorkloadDetail({ id }: { id: string }) {
             placeholder="Filter log lines..."
             className={`${inputClass} sm:max-w-md`}
           />
+          {source === 'stored' && (
+            <div className="grid flex-1 gap-2 sm:grid-cols-2">
+              <input
+                type="datetime-local"
+                value={since}
+                onChange={(e) => setSince(e.target.value)}
+                className={inputClass}
+                aria-label="Stored logs from"
+              />
+              <input
+                type="datetime-local"
+                value={until}
+                onChange={(e) => setUntil(e.target.value)}
+                className={inputClass}
+                aria-label="Stored logs until"
+              />
+            </div>
+          )}
           <label className="flex items-center gap-2 text-xs text-zinc-400">
             <input
               type="checkbox"

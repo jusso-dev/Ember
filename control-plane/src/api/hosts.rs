@@ -11,7 +11,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 pub async fn list(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<HostSummary>>, AppError> {
     let rows: Vec<(
@@ -25,28 +25,31 @@ pub async fn list(
         DateTime<Utc>,
     )> = sqlx::query_as(
         "SELECT id, name, status, os, arch, agent_version, last_seen_at, created_at \
-         FROM hosts ORDER BY created_at DESC",
+         FROM hosts WHERE tenant_id = ? ORDER BY created_at DESC",
     )
+    .bind(&admin.tenant.id)
     .fetch_all(&state.pool)
     .await?;
     let out = rows
         .into_iter()
-        .map(|(id, name, status, os, arch, agent_version, last_seen_at, created_at)| HostSummary {
-            id,
-            name,
-            status,
-            os,
-            arch,
-            agent_version,
-            last_seen_at: last_seen_at.map(|t| t.to_rfc3339()),
-            created_at: created_at.to_rfc3339(),
-        })
+        .map(
+            |(id, name, status, os, arch, agent_version, last_seen_at, created_at)| HostSummary {
+                id,
+                name,
+                status,
+                os,
+                arch,
+                agent_version,
+                last_seen_at: last_seen_at.map(|t| t.to_rfc3339()),
+                created_at: created_at.to_rfc3339(),
+            },
+        )
         .collect();
     Ok(Json(out))
 }
 
 pub async fn get(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<HostSummary>, AppError> {
@@ -61,9 +64,10 @@ pub async fn get(
         DateTime<Utc>,
     )> = sqlx::query_as(
         "SELECT id, name, status, os, arch, agent_version, last_seen_at, created_at \
-         FROM hosts WHERE id = ?",
+         FROM hosts WHERE id = ? AND tenant_id = ?",
     )
     .bind(&id)
+    .bind(&admin.tenant.id)
     .fetch_optional(&state.pool)
     .await?;
     let (id, name, status, os, arch, agent_version, last_seen_at, created_at) =
@@ -86,23 +90,28 @@ pub async fn delete(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
-    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM workloads WHERE host_id = ?")
-        .bind(&id)
-        .fetch_one(&state.pool)
-        .await?;
+    let count: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM workloads WHERE host_id = ? AND tenant_id = ?")
+            .bind(&id)
+            .bind(&admin.tenant.id)
+            .fetch_one(&state.pool)
+            .await?;
     if count.0 > 0 {
         return Err(AppError::Conflict("host still has workloads".into()));
     }
-    let vols: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM volumes WHERE host_id = ?")
-        .bind(&id)
-        .fetch_one(&state.pool)
-        .await?;
+    let vols: (i64,) =
+        sqlx::query_as("SELECT COUNT(*) FROM volumes WHERE host_id = ? AND tenant_id = ?")
+            .bind(&id)
+            .bind(&admin.tenant.id)
+            .fetch_one(&state.pool)
+            .await?;
     if vols.0 > 0 {
         return Err(AppError::Conflict("host still has volumes".into()));
     }
     state.registry.remove(&id).await;
-    sqlx::query("DELETE FROM hosts WHERE id = ?")
+    sqlx::query("DELETE FROM hosts WHERE id = ? AND tenant_id = ?")
         .bind(&id)
+        .bind(&admin.tenant.id)
         .execute(&state.pool)
         .await?;
     audit::record(
@@ -127,12 +136,15 @@ pub async fn enroll_token(
     let hash = sha256_hex(&token);
     let id = Uuid::now_v7().to_string();
     let expires = Utc::now() + chrono::Duration::hours(24);
-    sqlx::query("INSERT INTO enrollment_tokens (id, token_hash, expires_at) VALUES (?, ?, ?)")
-        .bind(&id)
-        .bind(&hash)
-        .bind(expires)
-        .execute(&state.pool)
-        .await?;
+    sqlx::query(
+        "INSERT INTO enrollment_tokens (id, token_hash, expires_at, tenant_id) VALUES (?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(&hash)
+    .bind(expires)
+    .bind(&admin.tenant.id)
+    .execute(&state.pool)
+    .await?;
     let install_command = format!(
         "curl -fsSL {base}/install.sh | sudo NAME=$(hostname) sh -s -- --server {base} --token {token}",
         base = state.public_base_url.as_str(),

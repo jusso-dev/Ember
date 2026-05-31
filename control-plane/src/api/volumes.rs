@@ -13,7 +13,7 @@ use serde_json::json;
 use uuid::Uuid;
 
 pub async fn list(
-    _admin: AdminSession,
+    admin: AdminSession,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<VolumeSummary>>, AppError> {
     let rows: Vec<(
@@ -29,8 +29,10 @@ pub async fn list(
     )> = sqlx::query_as(
         "SELECT v.id, v.name, v.host_id, h.name, v.size_mb, v.backend, v.host_path, v.status, v.created_at \
          FROM volumes v JOIN hosts h ON h.id = v.host_id \
+         WHERE v.tenant_id = ? \
          ORDER BY v.created_at DESC",
     )
+    .bind(&admin.tenant.id)
     .fetch_all(&state.pool)
     .await?;
     let out = rows
@@ -60,25 +62,29 @@ pub async fn create(
         return Err(AppError::BadRequest("name required".into()));
     }
     if req.backend != "hostdir" && req.backend != "loopback_ext4" {
-        return Err(AppError::BadRequest("backend must be hostdir or loopback_ext4".into()));
+        return Err(AppError::BadRequest(
+            "backend must be hostdir or loopback_ext4".into(),
+        ));
     }
     let host: Option<(String, String)> =
-        sqlx::query_as("SELECT id, name FROM hosts WHERE id = ?")
+        sqlx::query_as("SELECT id, name FROM hosts WHERE id = ? AND tenant_id = ?")
             .bind(&req.host_id)
+            .bind(&admin.tenant.id)
             .fetch_optional(&state.pool)
             .await?;
     let (host_id, host_name) = host.ok_or_else(|| AppError::BadRequest("host not found".into()))?;
 
     let volume_id = Uuid::now_v7().to_string();
     sqlx::query(
-        "INSERT INTO volumes (id, name, host_id, size_mb, backend, status) \
-         VALUES (?, ?, ?, ?, ?, 'pending')",
+        "INSERT INTO volumes (id, name, host_id, size_mb, backend, status, tenant_id) \
+         VALUES (?, ?, ?, ?, ?, 'pending', ?)",
     )
     .bind(&volume_id)
     .bind(&req.name)
     .bind(&host_id)
     .bind(req.size_mb as i64)
     .bind(&req.backend)
+    .bind(&admin.tenant.id)
     .execute(&state.pool)
     .await
     .map_err(|e| match e {
@@ -147,11 +153,13 @@ pub async fn delete(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<axum::http::StatusCode, AppError> {
-    let row: Option<(String, i64, String)> =
-        sqlx::query_as("SELECT host_id, size_mb, backend FROM volumes WHERE id = ?")
-            .bind(&id)
-            .fetch_optional(&state.pool)
-            .await?;
+    let row: Option<(String, i64, String)> = sqlx::query_as(
+        "SELECT host_id, size_mb, backend FROM volumes WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(&id)
+    .bind(&admin.tenant.id)
+    .fetch_optional(&state.pool)
+    .await?;
     let (host_id, size_mb, backend) = row.ok_or(AppError::NotFound)?;
     let in_use: (i64,) =
         sqlx::query_as("SELECT COUNT(*) FROM workload_volumes WHERE volume_id = ?")
@@ -159,10 +167,13 @@ pub async fn delete(
             .fetch_one(&state.pool)
             .await?;
     if in_use.0 > 0 {
-        return Err(AppError::Conflict("volume is attached to a workload".into()));
+        return Err(AppError::Conflict(
+            "volume is attached to a workload".into(),
+        ));
     }
-    sqlx::query("UPDATE volumes SET status='deleting' WHERE id = ?")
+    sqlx::query("UPDATE volumes SET status='deleting' WHERE id = ? AND tenant_id = ?")
         .bind(&id)
+        .bind(&admin.tenant.id)
         .execute(&state.pool)
         .await?;
     let _ = scheduler::enqueue(

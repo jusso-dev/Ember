@@ -18,15 +18,15 @@ pub async fn enroll(
 ) -> Result<Json<EnrollResponse>, AppError> {
     let token_hash = sha256_hex(&req.enrollment_token);
 
-    let row: Option<(String, DateTime<Utc>, Option<DateTime<Utc>>)> = sqlx::query_as(
-        "SELECT id, expires_at, consumed_at FROM enrollment_tokens WHERE token_hash = ?",
+    let row: Option<(String, DateTime<Utc>, Option<DateTime<Utc>>, Option<String>)> = sqlx::query_as(
+        "SELECT id, expires_at, consumed_at, tenant_id FROM enrollment_tokens WHERE token_hash = ?",
     )
     .bind(&token_hash)
     .fetch_optional(&state.pool)
     .await?;
 
-    let (tok_id, expires_at, consumed_at) =
-        row.ok_or_else(|| AppError::Unauthorized)?;
+    let (tok_id, expires_at, consumed_at, tenant_id) = row.ok_or_else(|| AppError::Unauthorized)?;
+    let tenant_id = tenant_id.ok_or(AppError::Unauthorized)?;
     if consumed_at.is_some() {
         return Err(AppError::Unauthorized);
     }
@@ -44,8 +44,8 @@ pub async fn enroll(
 
     let mut tx = state.pool.begin().await?;
     sqlx::query(
-        "INSERT INTO hosts (id, name, agent_token_hash, os, arch, agent_version, status) \
-         VALUES (?, ?, ?, ?, ?, ?, 'pending')",
+        "INSERT INTO hosts (id, name, agent_token_hash, os, arch, agent_version, status, tenant_id) \
+         VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)",
     )
     .bind(&host_id)
     .bind(&req.name)
@@ -53,6 +53,7 @@ pub async fn enroll(
     .bind(&req.os)
     .bind(&req.arch)
     .bind(&req.agent_version)
+    .bind(&tenant_id)
     .execute(&mut *tx)
     .await
     .map_err(|e| match e {
@@ -79,7 +80,9 @@ pub async fn enroll(
     .await;
     audit::record(
         &state,
-        &AuditActor::anonymous(&headers).with_email("agent"),
+        &AuditActor::anonymous(&headers)
+            .with_email("agent")
+            .with_tenant_id(&tenant_id),
         "agent.enroll",
         Some("host"),
         Some(&host_id),

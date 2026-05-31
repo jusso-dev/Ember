@@ -1,3 +1,4 @@
+use axum::http::header;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -15,6 +16,8 @@ pub enum AppError {
     Unauthorized,
     #[error("forbidden")]
     Forbidden,
+    #[error("too many requests")]
+    TooManyRequests { retry_after_secs: u64 },
     #[error("conflict: {0}")]
     Conflict(String),
     #[error(transparent)]
@@ -28,6 +31,10 @@ impl IntoResponse for AppError {
             AppError::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
             AppError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized".to_string()),
             AppError::Forbidden => (StatusCode::FORBIDDEN, "forbidden".to_string()),
+            AppError::TooManyRequests { .. } => (
+                StatusCode::TOO_MANY_REQUESTS,
+                "too many requests".to_string(),
+            ),
             AppError::Conflict(m) => (StatusCode::CONFLICT, m.clone()),
             AppError::Sqlx(e) => {
                 tracing::error!(error = ?e, "db error");
@@ -44,6 +51,12 @@ impl IntoResponse for AppError {
                 )
             }
         };
-        (status, Json(json!({ "error": message }))).into_response()
+        let mut response = (status, Json(json!({ "error": message }))).into_response();
+        if let AppError::TooManyRequests { retry_after_secs } = self {
+            if let Ok(value) = retry_after_secs.to_string().parse() {
+                response.headers_mut().insert(header::RETRY_AFTER, value);
+            }
+        }
+        response
     }
 }

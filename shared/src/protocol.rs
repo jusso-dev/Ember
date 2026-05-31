@@ -81,6 +81,7 @@ pub struct TenantAccessSummary {
     pub members: Vec<TenantMemberSummary>,
     pub invitations: Vec<TenantInvitationSummary>,
     pub role_matrix: Vec<RolePermissionSummary>,
+    pub audit_webhooks: Vec<AuditWebhookSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -96,6 +97,26 @@ pub struct RolePermissionSummary {
 pub struct CreateTenantInvitationRequest {
     pub email: String,
     pub role: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct AuditWebhookSummary {
+    pub id: String,
+    pub url: String,
+    pub event_filter: Vec<String>,
+    pub failure_count: u32,
+    pub last_error: Option<String>,
+    pub last_delivered_at: Option<String>,
+    pub created_at: String,
+    pub secret_once: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct CreateAuditWebhookRequest {
+    pub url: String,
+    pub event_filter: Vec<String>,
 }
 
 // --- Hosts ---
@@ -243,6 +264,22 @@ pub struct AuditLogRow {
     pub details: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct AuditLogListResponse {
+    pub rows: Vec<AuditLogRow>,
+    pub next_cursor: Option<i64>,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct AuditVerifyResponse {
+    pub verified: bool,
+    pub last_verified_id: Option<i64>,
+    pub first_bad_id: Option<i64>,
+}
+
 // --- Logs (workload container + control plane) ---
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -278,6 +315,24 @@ pub struct ControlPlaneLogLine {
 pub struct ControlPlaneLogsResponse {
     pub lines: Vec<ControlPlaneLogLine>,
     pub capacity: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct AgentLogLine {
+    pub id: Option<i64>,
+    pub host_id: String,
+    pub ts: String,
+    pub level: String,
+    pub target: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct AgentLogsResponse {
+    pub host_id: String,
+    pub lines: Vec<AgentLogLine>,
 }
 
 // --- Wire protocol: control-plane <-> agent over WebSocket ---
@@ -323,14 +378,28 @@ pub struct VolumeProvisionSpec {
 #[ts(export, export_to = "../../web/lib/types/")]
 pub enum Command {
     RunContainer(RunContainerSpec),
-    StopContainer { name: String, timeout_s: u32 },
-    RemoveContainer { name: String, force: bool },
+    StopContainer {
+        name: String,
+        timeout_s: u32,
+    },
+    RemoveContainer {
+        name: String,
+        force: bool,
+    },
     CreateVolume(VolumeProvisionSpec),
     DeleteVolume(VolumeProvisionSpec),
     FetchContainerLogs {
         workload_id: String,
         name: String,
         tail_lines: u32,
+    },
+    StreamContainerLogs {
+        workload_id: String,
+        name: String,
+        subscription_id: String,
+    },
+    CancelLogStream {
+        subscription_id: String,
     },
     Ping,
 }
@@ -375,7 +444,27 @@ pub struct LogsResultData {
 #[ts(export, export_to = "../../web/lib/types/")]
 pub enum AgentMsg {
     Hello(HelloPayload),
-    Ping { containers: Vec<ContainerSummary> },
-    TaskResult { task_id: String, result: TaskResultData },
-    LogsResult { task_id: String, result: LogsResultData },
+    Ping {
+        containers: Vec<ContainerSummary>,
+    },
+    TaskResult {
+        task_id: String,
+        result: TaskResultData,
+    },
+    LogsResult {
+        task_id: String,
+        result: LogsResultData,
+    },
+    LogChunk {
+        subscription_id: String,
+        workload_id: String,
+        lines: Vec<LogLine>,
+    },
+    LogStreamEnded {
+        subscription_id: String,
+        reason: String,
+    },
+    AgentLogs {
+        batch: Vec<AgentLogLine>,
+    },
 }

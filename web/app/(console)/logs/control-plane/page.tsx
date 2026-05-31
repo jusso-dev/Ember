@@ -28,6 +28,9 @@ export default function ControlPlaneLogsPage() {
 function ControlPlaneLogs() {
   const [response, setResponse] = useState<ControlPlaneLogsResponse | null>(null);
   const [level, setLevel] = useState<string>('');
+  const [source, setSource] = useState<'memory' | 'stored'>('memory');
+  const [since, setSince] = useState('');
+  const [until, setUntil] = useState('');
   const [query, setQuery] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -38,6 +41,12 @@ function ControlPlaneLogs() {
     const params = new URLSearchParams();
     params.set('limit', '1000');
     if (level) params.set('level', level);
+    params.set('source', source);
+    if (source === 'stored') {
+      if (since) params.set('since', new Date(since).toISOString());
+      if (until) params.set('until', new Date(until).toISOString());
+      if (query) params.set('search', query);
+    }
     api
       .get<ControlPlaneLogsResponse>(`/api/control-plane/logs?${params.toString()}`)
       .then((data) => {
@@ -52,7 +61,7 @@ function ControlPlaneLogs() {
     if (!autoRefresh) return;
     const t = setInterval(reload, 3000);
     return () => clearInterval(t);
-  }, [autoRefresh, level]);
+  }, [autoRefresh, level, source, since, until]);
 
   useEffect(() => {
     if (!autoScroll || !scrollRef.current) return;
@@ -80,7 +89,7 @@ function ControlPlaneLogs() {
       </PageHeader>
 
       <div className={`${panelClass}`}>
-        <div className="grid gap-3 border-b border-zinc-800 p-3 sm:grid-cols-[1fr_auto_auto]">
+        <div className="grid gap-3 border-b border-zinc-800 p-3 lg:grid-cols-[1fr_10rem_11rem_11rem_auto]">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -94,6 +103,26 @@ function ControlPlaneLogs() {
             <option value="INFO">Info and above</option>
             <option value="DEBUG">Debug and above</option>
           </select>
+          <select value={source} onChange={(e) => setSource(e.target.value as 'memory' | 'stored')} className={inputClass}>
+            <option value="memory">Memory</option>
+            <option value="stored">Stored</option>
+          </select>
+          <input
+            type="datetime-local"
+            value={since}
+            onChange={(e) => setSince(e.target.value)}
+            disabled={source !== 'stored'}
+            className={inputClass}
+            aria-label="Stored logs from"
+          />
+          <input
+            type="datetime-local"
+            value={until}
+            onChange={(e) => setUntil(e.target.value)}
+            disabled={source !== 'stored'}
+            className={inputClass}
+            aria-label="Stored logs until"
+          />
           <label className="flex items-center gap-2 text-xs text-zinc-400">
             <input
               type="checkbox"

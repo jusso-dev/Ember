@@ -1,5 +1,9 @@
 use crate::{docker, volumes};
 use ember_shared::protocol::{AgentMsg, Command, ContainerSummary, LogsResultData, TaskResultData};
+use std::sync::OnceLock;
+use tokio::sync::Semaphore;
+
+const MAX_TAIL_LINES: u32 = 5000;
 
 pub async fn list_containers() -> anyhow::Result<Vec<ContainerSummary>> {
     docker::list_ember_containers().await
@@ -56,26 +60,47 @@ pub async fn execute(task_id: String, cmd: &Command) -> AgentMsg {
         Command::FetchContainerLogs {
             name, tail_lines, ..
         } => {
-            let result = match docker::container_logs(name, *tail_lines).await {
-                Ok(lines) => LogsResultData {
-                    success: true,
-                    message: None,
-                    truncated: lines.len() as u32 >= *tail_lines,
-                    lines,
-                },
-                Err(e) => LogsResultData {
+            let result = if *tail_lines > MAX_TAIL_LINES {
+                LogsResultData {
                     success: false,
-                    message: Some(format!("container_logs: {e:#}")),
+                    message: Some("tail too large".into()),
                     lines: vec![],
                     truncated: false,
-                },
+                }
+            } else if let Ok(_permit) = log_semaphore().try_acquire() {
+                match docker::container_logs(name, *tail_lines).await {
+                    Ok((lines, payload_truncated)) => LogsResultData {
+                        success: true,
+                        message: None,
+                        truncated: payload_truncated || lines.len() as u32 >= *tail_lines,
+                        lines,
+                    },
+                    Err(e) => LogsResultData {
+                        success: false,
+                        message: Some(format!("container_logs: {e:#}")),
+                        lines: vec![],
+                        truncated: false,
+                    },
+                }
+            } else {
+                LogsResultData {
+                    success: false,
+                    message: Some("agent log fetch concurrency limit reached".into()),
+                    lines: vec![],
+                    truncated: false,
+                }
             };
-            AgentMsg::LogsResult {
-                task_id,
-                result,
-            }
+            AgentMsg::LogsResult { task_id, result }
+        }
+        Command::StreamContainerLogs { .. } | Command::CancelLogStream { .. } => {
+            msg_task(task_id, ok(None, None))
         }
     }
+}
+
+fn log_semaphore() -> &'static Semaphore {
+    static SEMAPHORE: OnceLock<Semaphore> = OnceLock::new();
+    SEMAPHORE.get_or_init(|| Semaphore::new(2))
 }
 
 fn msg_task(task_id: String, result: TaskResultData) -> AgentMsg {

@@ -35,6 +35,13 @@ const NAV_GROUPS: NavGroup[] = [
         description: 'Fleet health and activity',
         keywords: ['overview', 'home', 'activity', 'events'],
       },
+      {
+        href: '/control-plane',
+        label: 'Cloud foundation',
+        short: 'F',
+        description: 'Landing zone and guardrails',
+        keywords: ['cloud', 'foundation', 'landing zone', 'guardrails', 'control plane'],
+      },
     ],
   },
   {
@@ -406,7 +413,7 @@ export function ShellClient({
 
         <nav className="fixed inset-x-0 bottom-0 z-20 flex border-t border-zinc-800 bg-zinc-950/95 px-2 py-2 backdrop-blur sm:hidden">
           {NAV_GROUPS.flatMap((group) => group.items)
-            .filter((item) => ['/', '/hosts', '/workloads', '/volumes', '/access'].includes(item.href))
+            .filter((item) => ['/', '/control-plane', '/hosts', '/workloads', '/volumes'].includes(item.href))
             .map((item) => {
               const active = isActive(pathname, item.href);
               return (

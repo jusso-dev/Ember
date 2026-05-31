@@ -6,7 +6,9 @@ pub async fn connect(url: &str) -> anyhow::Result<SqlitePool> {
         .max_connections(8)
         .connect(url)
         .await?;
-    sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&pool)
+        .await?;
     Ok(pool)
 }
 
