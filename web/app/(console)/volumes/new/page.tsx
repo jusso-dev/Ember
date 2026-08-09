@@ -57,12 +57,18 @@ function NewVolume() {
   }
 
   return (
-    <form onSubmit={submit} className="mx-auto max-w-3xl space-y-6">
+    <form onSubmit={submit} className="mx-auto max-w-3xl space-y-6" data-testid="volume-new-form">
       <PageHeader title="New volume" eyebrow="Provision storage" />
 
       <div className={`${panelClass} space-y-5 p-5`}>
         <Field label="Host">
-          <select required value={hostId} onChange={(e) => setHostId(e.target.value)} className={inputClass}>
+          <select
+            required
+            value={hostId}
+            onChange={(e) => setHostId(e.target.value)}
+            className={inputClass}
+            data-testid="volume-host"
+          >
             <option value="">Choose host...</option>
             {hosts.map((h) => (
               <option key={h.id} value={h.id}>
@@ -74,7 +80,13 @@ function NewVolume() {
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Name">
-            <input required value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+            <input
+              required
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className={inputClass}
+              data-testid="volume-name"
+            />
           </Field>
 
           <Field label="Size (MB)">
@@ -84,12 +96,18 @@ function NewVolume() {
               value={sizeMb}
               onChange={(e) => setSizeMb(e.target.value)}
               className={inputClass}
+              data-testid="volume-size"
             />
           </Field>
         </div>
 
         <Field label="Backend">
-          <select value={backend} onChange={(e) => setBackend(e.target.value)} className={inputClass}>
+          <select
+            value={backend}
+            onChange={(e) => setBackend(e.target.value)}
+            className={inputClass}
+            data-testid="volume-backend"
+          >
             <option value="hostdir">hostdir (bind-mount a directory)</option>
             <option value="loopback_ext4">loopback_ext4 (requires root on agent)</option>
           </select>
@@ -101,9 +119,18 @@ function NewVolume() {
         </div>
       </div>
 
-      {err && <p className="text-sm text-red-400">{err}</p>}
+      {err && (
+        <p className="text-sm text-red-400" data-testid="volume-error" role="alert">
+          {err}
+        </p>
+      )}
       <div className="flex gap-3">
-        <button type="submit" disabled={busy || !hosts.length} className={buttonPrimaryClass}>
+        <button
+          type="submit"
+          disabled={busy || !hosts.length}
+          className={buttonPrimaryClass}
+          data-testid="volume-submit"
+        >
           {busy ? 'Creating...' : 'Create volume'}
         </button>
         <button type="button" onClick={() => router.back()} className={buttonSecondaryClass}>

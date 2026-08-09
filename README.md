@@ -4,6 +4,32 @@ Ember is a small self-hosted mini cloud for running Docker workloads on one or m
 
 It is intentionally compact: a Rust control plane, a Rust host agent, and a Next.js dashboard. It is useful as a local lab, a lightweight homelab orchestrator, or a foundation for experimenting with control-plane and agent architecture.
 
+### Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/02-dashboard.png" alt="Fleet overview dashboard" width="900" />
+</p>
+
+| Login | Hosts | Access |
+| --- | --- | --- |
+| ![Login](docs/screenshots/01-login.png) | ![Hosts](docs/screenshots/03-hosts.png) | ![Access](docs/screenshots/09-access.png) |
+
+| New workload | Enroll host | Audit log |
+| --- | --- | --- |
+| ![New workload](docs/screenshots/06-workload-new.png) | ![Enroll](docs/screenshots/04-hosts-enroll.png) | ![Audit](docs/screenshots/10-audit.png) |
+
+More shots live under [`docs/screenshots/`](docs/screenshots/). Refresh with:
+
+```bash
+# Install Chromium once for capture (from e2e/)
+(cd e2e && pnpm exec playwright install chromium)
+
+# Against a running stack (LAN, tunnel, or local dev)
+BASE_URL=http://192.168.1.19:3200 \
+EMBER_EMAIL=owner@ember.e2e EMBER_PASSWORD=ember-e2e-password-1 \
+  node scripts/capture-screenshots.mjs
+```
+
 ## What Ember Does
 
 Ember lets you:
@@ -53,8 +79,13 @@ The current implementation manages Docker containers directly on each host throu
 |-- shared/                # Rust structs shared by control-plane and agent
 |   `-- src/protocol.rs    # API payloads and agent wire protocol
 |-- web/                   # Next.js dashboard
+|-- e2e/                   # Lightpanda + Playwright end-to-end tests
 |-- docs/dev-setup.md      # shorter development setup notes
-`-- scripts/dev.sh         # starts control-plane and web together
+|-- Dockerfile             # multi-stage control-plane image
+|-- docker-compose.yml     # control-plane + web production-style stack
+`-- scripts/
+    |-- dev.sh             # starts control-plane and web together
+    `-- e2e.sh             # builds stack deps and runs e2e suite
 ```
 
 ## Architecture
@@ -142,9 +173,9 @@ IDs are UUIDv7 strings.
 - Rust stable, pinned by `rust-toolchain.toml`.
 - Node.js 22+.
 - `pnpm`.
-- Docker on any machine running `ember-agent`.
+- Docker on any machine running `ember-agent` (optional for control-plane-only work).
 
-The control plane itself does not need Docker unless you also run an agent on the same machine. For local development without a host Rust toolchain, you can run the control plane in Docker as shown below.
+The control plane itself does not need Docker unless you also run an agent on the same machine. For a production-style local stack, use `docker compose up --build`. For development without a host Rust toolchain, you can still run the control plane in a one-off container as shown below.
 
 ## Quick Start
 
@@ -169,7 +200,52 @@ The dev script binds the Rust control plane to `0.0.0.0:8080`, binds the Next.js
 
 The Next.js app proxies `/api/*` to the control plane at `http://127.0.0.1:8080` from the web server process.
 
-## Running The Control Plane In Docker
+## Production-Style Stack (Compose)
+
+Multi-stage images for the control plane and Next.js dashboard:
+
+```bash
+docker compose up --build
+```
+
+- Control plane: <http://127.0.0.1:8080/api/health>
+- Dashboard: <http://127.0.0.1:3000>
+
+SQLite persists in the `ember-db` volume. Create the first owner account in the UI on first boot. Put TLS and auth-aware routing in front of both services for remote deployments.
+
+### Homelab deploy
+
+If `ssh homelab` works (see `~/.ssh/config`), ship and start on that host:
+
+```bash
+bash scripts/deploy-homelab.sh
+```
+
+Defaults (busy host-safe ports):
+
+| Service | Host port | URL (LAN example) |
+| --- | --- | --- |
+| Web | `3200` | `http://192.168.1.19:3200` |
+| Control plane | `8080` | `http://192.168.1.19:8080/api/health` |
+
+Override with `EMBER_WEB_PORT`, `EMBER_CP_PORT`, `EMBER_PUBLIC_BASE_URL`, `EMBER_DEPLOY_HOST`, `EMBER_DEPLOY_DIR`.
+
+Remote e2e (API from laptop; browser tests run better **on** the homelab host so Lightpanda can hit `127.0.0.1`):
+
+```bash
+# API from laptop
+E2E_EXTERNAL_STACK=1 \
+E2E_BASE_URL=http://192.168.1.19:3200 \
+E2E_CP_URL=http://192.168.1.19:8080 \
+  (cd e2e && pnpm exec playwright test --project=api)
+
+# Browser on homelab
+ssh homelab 'cd ~/apps/Ember/e2e && \
+  E2E_EXTERNAL_STACK=1 E2E_BASE_URL=http://127.0.0.1:3200 E2E_CP_URL=http://127.0.0.1:8080 \
+  pnpm exec playwright test --project=lightpanda'
+```
+
+## Running The Control Plane In Docker (dev)
 
 If Rust is not installed on the host, run the Rust control plane in Docker with a persisted SQLite volume:
 
@@ -296,9 +372,63 @@ cargo test -p ember-shared
 # Build the web app.
 (cd web && pnpm build)
 
-# Check the Rust control plane from the Docker container.
-docker exec ember-control-plane bash -lc 'export PATH=/usr/local/cargo/bin:$PATH; cd /app && cargo check -p ember-control-plane'
+# End-to-end tests (Lightpanda + Playwright). See Testing below.
+bash scripts/e2e.sh
+
+# Production-style stack.
+docker compose up --build
 ```
+
+## Testing
+
+Ember ships an end-to-end suite under `e2e/` that exercises the flows documented in this README.
+
+- **API tests** use Playwright's request client against the control plane and the Next.js `/api/*` rewrite.
+- **Browser tests** drive the dashboard through **Lightpanda** over CDP using **Puppeteer** (`puppeteer-core`). Lightpanda is started via `@lightpanda/browser`. (Playwright's `connectOverCDP` path is still brittle against current Lightpanda builds for local navigation; Puppeteer is the stable client for the same CDP server.)
+
+### What the suite covers
+
+| Area | Coverage |
+| --- | --- |
+| Health | `GET /api/health` on control plane and via web proxy; installer script at `/install.sh` |
+| First-run auth | Owner + tenant setup, login, bad password, session cookie, logout, setup-once |
+| Authorization | Protected routes return 401 without session |
+| Hosts | Mint enrollment token + install command (UI and API) |
+| Access control | Tenant members, role matrix, create/revoke invitations |
+| Volumes / workloads | Form defaults from the README (`hostdir`, `nginx:alpine`, port fields); create fails cleanly without a host |
+| Navigation | Dashboard, launchpad, shell search, observability pages |
+| Optional agent flow | Enroll agent, create volume, deploy `nginx:alpine` (Docker required) |
+
+### Run locally
+
+```bash
+# Builds control plane, installs deps, starts isolated stack, runs tests.
+bash scripts/e2e.sh
+
+# API project only (no browser).
+(cd e2e && pnpm test -- --project=api)
+
+# Browser project only (Lightpanda).
+(cd e2e && pnpm test -- --project=lightpanda)
+
+# Full README agent path (needs Docker + built ember-agent).
+E2E_AGENT_FLOW=1 bash scripts/e2e.sh
+
+# Production web server instead of next dev.
+E2E_WEB_MODE=prod bash scripts/e2e.sh
+```
+
+The harness starts:
+
+1. Lightpanda CDP on `127.0.0.1:19222` (or Lightpanda Cloud when `LPD_TOKEN` / `CDP_WS_URL` is set).
+2. `ember-control-plane` on port `18080` with a temporary SQLite file.
+3. Next.js on port `13000` with `CONTROL_PLANE_URL` pointed at that control plane.
+
+Override ports with `E2E_CP_PORT`, `E2E_WEB_PORT`, `E2E_CDP_PORT`. Point at an already-running stack with `E2E_EXTERNAL_STACK=1` and the usual `E2E_BASE_URL` / `E2E_CP_URL` / `CDP_WS_URL` variables.
+
+HTML report: `e2e/playwright-report` after a run (`cd e2e && pnpm report`).
+
+CI runs the same suite via `.github/workflows/ci.yml`.
 
 ## Configuration
 
@@ -309,9 +439,16 @@ docker exec ember-control-plane bash -lc 'export PATH=/usr/local/cargo/bin:$PATH
 | `EMBER_BIND_ADDR` | `0.0.0.0:8080` | Address for the Rust API server. |
 | `EMBER_DB_URL` | `sqlite://ember.db?mode=rwc` | SQLite database URL. The file is created on first boot. |
 | `EMBER_PUBLIC_BASE_URL` | `http://<detected-lan-ip>:3000` | Base URL used when generating installer/invitation-style links. |
+| `EMBER_AUDIT_RETENTION_DAYS` | `365` | Days to retain audit rows. |
+| `EMBER_CONTROL_PLANE_LOG_RETENTION_DAYS` | `7` | Days to retain control-plane log rows. |
+| `EMBER_WORKLOAD_LOG_RETENTION_DAYS` | `7` | Days to retain workload log rows. |
+| `EMBER_AGENT_LOG_RETENTION_DAYS` | `7` | Days to retain agent log rows. |
+| `EMBER_AUDIT_SINK` | `db` | Comma-separated audit sinks (`db`, webhook delivery metadata). |
 | `RUST_LOG` | `info,sqlx=warn,tower_http=info` | Optional tracing filter. |
 
 `EMBER_ADMIN_PASSWORD` is no longer used. Auth is user-backed and starts with first-run account creation.
+
+`GET /api/health` checks process liveness and SQLite connectivity. The control plane shuts down cleanly on `SIGINT` / `SIGTERM`.
 
 ### Web
 

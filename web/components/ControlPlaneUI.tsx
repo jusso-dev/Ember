@@ -2,7 +2,7 @@ import Link from 'next/link';
 
 export const panelClass = 'rounded-lg border border-zinc-800 bg-zinc-900/40 shadow-sm shadow-black/10';
 export const inputClass =
-  'w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 outline-none transition focus:border-zinc-500 focus:ring-2 focus:ring-zinc-700/40 disabled:cursor-not-allowed disabled:opacity-60';
+  'w-full rounded border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 outline-none transition placeholder:text-zinc-600 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-700/40 disabled:cursor-not-allowed disabled:opacity-60';
 export const buttonPrimaryClass =
   'rounded bg-sky-500 px-3 py-1.5 text-sm font-medium text-zinc-950 transition hover:bg-sky-400 disabled:cursor-not-allowed disabled:opacity-50';
 export const buttonSecondaryClass =
@@ -66,11 +66,13 @@ export function EmptyState({
   body,
   href,
   action,
+  onAction,
 }: {
   title: string;
   body: string;
   href?: string;
   action?: string;
+  onAction?: () => void;
 }) {
   return (
     <div className="px-6 py-10 text-center">
@@ -79,13 +81,24 @@ export function EmptyState({
       </div>
       <div className="text-sm font-medium text-zinc-200">{title}</div>
       <p className="mx-auto mt-1 max-w-md text-sm text-zinc-500">{body}</p>
-      {href && action && (
-        <Link href={href} className={`${buttonSecondaryClass} mt-4 inline-flex`}>
+      {action && href && (
+        <Link href={href} className={`${buttonPrimaryClass} mt-4 inline-flex`}>
           {action}
         </Link>
       )}
+      {action && !href && onAction && (
+        <button type="button" onClick={onAction} className={`${buttonPrimaryClass} mt-4 inline-flex`}>
+          {action}
+        </button>
+      )}
     </div>
   );
+}
+
+/** Prefer the public base URL embedded in the install command over window.origin. */
+export function serverUrlFromInstallCommand(installCommand: string, fallback?: string) {
+  const match = installCommand.match(/--server\s+(\S+)/);
+  return match?.[1] || fallback || (typeof window !== 'undefined' ? window.location.origin : '');
 }
 
 export function formatDate(value?: string | null) {

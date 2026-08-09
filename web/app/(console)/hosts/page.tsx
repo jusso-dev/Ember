@@ -10,6 +10,7 @@ import {
   formatRelative,
   inputClass,
   panelClass,
+  serverUrlFromInstallCommand,
 } from '@/components/ControlPlaneUI';
 import { api, ApiError } from '@/lib/api';
 import type { HostSummary } from '@/lib/types/HostSummary';
@@ -72,7 +73,7 @@ function Hosts() {
   });
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="hosts-page">
       <PageHeader title="Hosts" eyebrow="Compute fleet">
         <button
           onClick={() => {
@@ -81,6 +82,7 @@ function Hosts() {
             mint();
           }}
           className={buttonPrimaryClass}
+          data-testid="hosts-add"
         >
           Add host
         </button>
@@ -93,42 +95,67 @@ function Hosts() {
       </div>
 
       {adding && (
-        <div className={`${panelClass} p-4`}>
+        <div className={`${panelClass} p-4`} data-testid="hosts-enroll-panel">
           <div className="mb-2 flex items-center justify-between">
             <h2 className="text-sm font-medium">Enroll a new host</h2>
             <button
               onClick={() => setAdding(false)}
               className="text-xs text-zinc-400 hover:text-zinc-100"
+              data-testid="hosts-enroll-close"
             >
               Close
             </button>
           </div>
-          {busy && <p className="text-sm text-zinc-500">Minting token...</p>}
-          {err && <p className="text-sm text-red-400">{err}</p>}
+          {busy && (
+            <p className="text-sm text-zinc-500" data-testid="hosts-enroll-busy">
+              Minting token...
+            </p>
+          )}
+          {err && (
+            <p className="text-sm text-red-400" data-testid="hosts-enroll-error" role="alert">
+              {err}
+            </p>
+          )}
           {token && (
-            <>
+            <div data-testid="hosts-enroll-token">
               <p className="text-sm text-zinc-400">
                 On the target Linux host, run the agent binary like so (token expires{' '}
                 {new Date(token.expires_at).toLocaleString()}):
               </p>
-              <pre className="mt-2 overflow-x-auto rounded bg-black/40 p-3 text-xs text-zinc-200">
+              <pre
+                className="mt-2 overflow-x-auto rounded bg-black/40 p-3 text-xs text-zinc-200"
+                data-testid="hosts-enroll-command"
+              >
 {`ember-agent enroll \\
-  --server ${(typeof window !== 'undefined' && window.location.origin) || '<control-plane-url>'} \\
+  --server ${serverUrlFromInstallCommand(token.install_command)} \\
   --token ${token.token} \\
   --name <hostname>
 ember-agent run`}
               </pre>
-              <p className="mt-3 text-xs text-zinc-500">Or, if you have an installer hosted:</p>
-              <pre className="mt-1 overflow-x-auto rounded bg-black/40 p-3 text-xs text-zinc-200">
+              <p className="mt-3 text-xs text-zinc-500">Or use the one-shot installer:</p>
+              <pre
+                className="mt-1 overflow-x-auto rounded bg-black/40 p-3 text-xs text-zinc-200"
+                data-testid="hosts-install-command"
+              >
                 {token.install_command}
               </pre>
-              <button
-                onClick={() => navigator.clipboard.writeText(token.token)}
-                className={`${buttonSecondaryClass} mt-2`}
-              >
-                Copy token
-              </button>
-            </>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  onClick={() => navigator.clipboard.writeText(token.token)}
+                  className={buttonSecondaryClass}
+                  data-testid="hosts-copy-token"
+                >
+                  Copy token
+                </button>
+                <button
+                  onClick={() => navigator.clipboard.writeText(token.install_command)}
+                  className={buttonSecondaryClass}
+                  data-testid="hosts-copy-install"
+                >
+                  Copy install command
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}
@@ -166,6 +193,12 @@ ember-agent run`}
                   <EmptyState
                     title="No hosts enrolled"
                     body="Add a host to give Ember somewhere to place workloads and create volumes."
+                    action="Add host"
+                    onAction={() => {
+                      setAdding(true);
+                      setToken(null);
+                      mint();
+                    }}
                   />
                 </td>
               </tr>

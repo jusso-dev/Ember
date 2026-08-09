@@ -1,0 +1,13 @@
+target
+**/target
+**/.next
+**/node_modules
+e2e
+.git
+.github
+*.db
+*.db-*
+docs
+**/.DS_Store
+**/playwright-report
+**/test-results

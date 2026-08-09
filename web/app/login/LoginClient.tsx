@@ -52,14 +52,15 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
   const setup = mode === 'setup';
 
   return (
-    <main className="grid min-h-screen place-items-center px-4">
+    <main className="grid min-h-screen place-items-center px-4" data-testid="login-page">
       <form
         onSubmit={submit}
         className={`${panelClass} w-full max-w-md space-y-4 p-6`}
+        data-testid={setup ? 'setup-form' : 'login-form'}
       >
         <div>
           <div className="text-xs uppercase tracking-wider text-zinc-500">Control plane</div>
-          <h1 className="mt-1 text-2xl font-semibold tracking-tight">
+          <h1 className="mt-1 text-2xl font-semibold tracking-tight" data-testid="auth-heading">
             {setup ? 'Create owner account' : 'Sign in to Ember'}
           </h1>
         </div>
@@ -78,6 +79,9 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 className={`${inputClass} mt-1 py-2`}
+                data-testid="setup-name"
+                name="name"
+                autoComplete="name"
               />
             </label>
             <label className="block">
@@ -88,6 +92,8 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
                 value={tenantName}
                 onChange={(e) => setTenantName(e.target.value)}
                 className={`${inputClass} mt-1 py-2`}
+                data-testid="setup-tenant"
+                name="tenant_name"
               />
             </label>
           </div>
@@ -101,6 +107,9 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className={`${inputClass} mt-1 py-2`}
+            data-testid="auth-email"
+            name="email"
+            autoComplete="email"
           />
         </label>
         <label className="block">
@@ -112,6 +121,9 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             className={`${inputClass} mt-1 py-2`}
+            data-testid="auth-password"
+            name="password"
+            autoComplete={setup ? 'new-password' : 'current-password'}
           />
         </label>
         {setup && (
@@ -124,6 +136,9 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               className={`${inputClass} mt-1 py-2`}
+              data-testid="setup-confirm-password"
+              name="confirm_password"
+              autoComplete="new-password"
             />
           </label>
         )}
@@ -132,11 +147,16 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
             Owner can manage users, roles, MFA policy, hosts, workloads, volumes, and enrollment tokens.
           </div>
         )}
-        {err && <p className="text-sm text-red-400">{err}</p>}
+        {err && (
+          <p className="text-sm text-red-400" data-testid="auth-error" role="alert">
+            {err}
+          </p>
+        )}
         <button
           type="submit"
           disabled={busy}
           className={`${buttonPrimaryClass} w-full py-2`}
+          data-testid="auth-submit"
         >
           {busy ? 'Please wait...' : setup ? 'Create account' : 'Sign in'}
         </button>

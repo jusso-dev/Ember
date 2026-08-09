@@ -7,9 +7,22 @@
 }
 
 body {
+  color: oklch(0.93 0.01 255);
   background:
     radial-gradient(circle at 18% 0%, oklch(0.28 0.04 245 / 0.3), transparent 28rem),
     linear-gradient(180deg, oklch(0.18 0.008 255), oklch(0.145 0.009 255));
+}
+
+/* Dark datetime controls often paint unreadable native chrome. */
+input[type='datetime-local'],
+input[type='date'],
+input[type='time'] {
+  color-scheme: dark;
+}
+
+input::placeholder {
+  color: oklch(0.55 0.01 255);
+  opacity: 1;
 }
 
 ::selection {

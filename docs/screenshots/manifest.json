@@ -1,0 +1,18 @@
+{
+  "base": "http://127.0.0.1:13200",
+  "shots": [
+    "01-login",
+    "02-dashboard",
+    "03-hosts",
+    "05-workloads",
+    "06-workload-new",
+    "07-volumes",
+    "08-volume-new",
+    "09-access",
+    "10-audit",
+    "11-control-plane-logs",
+    "12-cloud-foundation",
+    "04-hosts-enroll"
+  ],
+  "capturedAt": "2026-08-09T09:59:04.741Z"
+}

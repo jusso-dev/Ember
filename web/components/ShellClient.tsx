@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
-import { StatusBadge, inputClass } from '@/components/ControlPlaneUI';
+import { inputClass } from '@/components/ControlPlaneUI';
 import type { SessionInfo } from '@/lib/types/SessionInfo';
 
 type NavItem = {
@@ -205,10 +205,10 @@ export function ShellClient({
   const activeGroup = NAV_GROUPS.find((group) => group.items.some((item) => isActive(pathname, item.href)));
 
   return (
-    <div className="min-h-screen bg-zinc-950/20">
+    <div className="min-h-screen bg-zinc-950/20" data-testid="app-shell">
       <header className="sticky top-0 z-20 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur">
         <div className="flex h-14 items-center gap-3 px-4">
-          <Link href="/" className="flex min-w-0 items-center gap-2">
+          <Link href="/" className="flex min-w-0 items-center gap-2" data-testid="shell-brand">
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded border border-sky-500/25 bg-sky-500/10 text-sm font-semibold text-sky-300">
               E
             </span>
@@ -236,6 +236,7 @@ export function ShellClient({
               placeholder="Search resources, services, and commands"
               className={`${inputClass} h-8 border-zinc-800 bg-zinc-900/70 text-xs`}
               autoComplete="off"
+              data-testid="shell-search"
             />
             {searchOpen && (
               <div className="absolute left-0 right-0 top-10 z-30 overflow-hidden rounded-lg border border-zinc-800 bg-zinc-950 shadow-2xl shadow-black/40">
@@ -276,16 +277,26 @@ export function ShellClient({
           </div>
 
           <div className="ml-auto flex items-center gap-3">
-            <span className="hidden rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-500 md:inline">
+            <span
+              className="hidden rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-500 md:inline"
+              data-testid="shell-tenant"
+              title="Active tenant"
+            >
               {sessionState?.active_tenant?.name ?? 'No tenant'}
             </span>
-            <StatusBadge state="ok" />
-            <span className="hidden rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-500 sm:inline">
-              {sessionState?.user ? `${sessionState.user.name} / ${sessionState.user.role}` : 'signed in'}
+            <span
+              className="hidden rounded border border-zinc-800 bg-zinc-900 px-2 py-1 text-xs text-zinc-400 sm:inline"
+              data-testid="shell-user"
+              title={sessionState?.user?.email ?? undefined}
+            >
+              {sessionState?.user
+                ? `${sessionState.user.name} · ${sessionState.user.role}`
+                : 'signed in'}
             </span>
             <button
               onClick={logout}
               className="rounded px-2 py-1 text-sm text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100"
+              data-testid="shell-logout"
             >
               Log out
             </button>
@@ -319,9 +330,9 @@ export function ShellClient({
               </button>
             </div>
 
-            <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-3">
+            <nav className="min-h-0 flex-1 overflow-y-auto px-2 py-3" data-testid="shell-nav">
               {NAV_GROUPS.map((group) => (
-                <div key={group.id} className="mb-2">
+                <div key={group.id} className="mb-2" data-testid={`nav-group-${group.id}`}>
                   <button
                     type="button"
                     onClick={() => (collapsed ? setCollapsed(false) : toggleGroup(group.id))}
@@ -332,6 +343,7 @@ export function ShellClient({
                     }`}
                     title={group.label}
                     aria-expanded={!collapsed && openGroups[group.id]}
+                    data-testid={`nav-group-toggle-${group.id}`}
                   >
                     <span className="grid h-7 w-7 shrink-0 place-items-center rounded border border-zinc-800 bg-zinc-900 text-[11px] normal-case tracking-normal text-zinc-300">
                       {group.short}
@@ -357,6 +369,7 @@ export function ShellClient({
                                 ? 'bg-sky-500/15 text-sky-200'
                                 : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100'
                             }`}
+                            data-testid={`nav-link-${item.href.replace(/\//g, '-').replace(/^-/, '') || 'dashboard'}`}
                           >
                             <span className="block truncate">{item.label}</span>
                             {item.description && (

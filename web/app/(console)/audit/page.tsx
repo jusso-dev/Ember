@@ -206,20 +206,24 @@ function AuditLog() {
             <option value="failure">Failures only</option>
             <option value="denied">Denied only</option>
           </select>
-          <input
-            type="datetime-local"
-            value={from}
-            onChange={(e) => setFrom(e.target.value)}
-            className={inputClass}
-            aria-label="From"
-          />
-          <input
-            type="datetime-local"
-            value={to}
-            onChange={(e) => setTo(e.target.value)}
-            className={inputClass}
-            aria-label="Until"
-          />
+          <label className="flex min-w-[11rem] flex-col gap-1 text-[10px] uppercase tracking-wider text-zinc-600">
+            From
+            <input
+              type="datetime-local"
+              value={from}
+              onChange={(e) => setFrom(e.target.value)}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex min-w-[11rem] flex-col gap-1 text-[10px] uppercase tracking-wider text-zinc-600">
+            Until
+            <input
+              type="datetime-local"
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              className={inputClass}
+            />
+          </label>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-b border-zinc-800 px-3 py-2">

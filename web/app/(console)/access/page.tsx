@@ -115,17 +115,21 @@ function Access() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="access-page">
       <PageHeader title="Access control" eyebrow="Tenant administration" />
 
       {!access ? (
-        <div className={`${panelClass} p-5 text-sm text-zinc-500`}>Loading access state...</div>
+        <div className={`${panelClass} p-5 text-sm text-zinc-500`} data-testid="access-loading">
+          Loading access state...
+        </div>
       ) : (
         <>
           <section className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-            <div className={`${panelClass} p-5`}>
+            <div className={`${panelClass} p-5`} data-testid="access-tenant">
               <div className="text-xs uppercase tracking-wider text-zinc-500">Current tenant</div>
-              <div className="mt-2 text-2xl font-semibold text-zinc-50">{access.tenant.name}</div>
+              <div className="mt-2 text-2xl font-semibold text-zinc-50" data-testid="access-tenant-name">
+                {access.tenant.name}
+              </div>
               <div className="mt-2 flex items-center gap-2">
                 <StatusBadge state={access.tenant.role} />
                 <span className="text-sm text-zinc-500">{access.tenant.slug}</span>
@@ -136,7 +140,7 @@ function Access() {
               </p>
             </div>
 
-            <form onSubmit={invite} className={`${panelClass} p-5`}>
+            <form onSubmit={invite} className={`${panelClass} p-5`} data-testid="access-invite-form">
               <div className="text-xs uppercase tracking-wider text-zinc-500">Invite user</div>
               <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_12rem_auto]">
                 <input
@@ -146,22 +150,32 @@ function Access() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   className={inputClass}
+                  data-testid="access-invite-email"
                 />
-                <select value={role} onChange={(e) => setRole(e.target.value)} className={inputClass}>
+                <select
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  className={inputClass}
+                  data-testid="access-invite-role"
+                >
                   <option value="admin">admin</option>
                   <option value="operator">operator</option>
                   <option value="viewer">viewer</option>
                   <option value="auditor">auditor</option>
                 </select>
-                <button type="submit" disabled={busy} className={buttonPrimaryClass}>
+                <button type="submit" disabled={busy} className={buttonPrimaryClass} data-testid="access-invite-submit">
                   {busy ? 'Inviting...' : 'Invite'}
                 </button>
               </div>
-              {err && <p className="mt-3 text-sm text-red-400">{err}</p>}
+              {err && (
+                <p className="mt-3 text-sm text-red-400" data-testid="access-error" role="alert">
+                  {err}
+                </p>
+              )}
               {createdInvite?.invite_url && (
-                <div className="mt-4 rounded border border-zinc-800 bg-zinc-950/60 p-3">
+                <div className="mt-4 rounded border border-zinc-800 bg-zinc-950/60 p-3" data-testid="access-invite-result">
                   <div className="text-xs uppercase tracking-wider text-zinc-500">Invite link</div>
-                  <div className="mt-2 break-all font-mono text-xs text-zinc-300">
+                  <div className="mt-2 break-all font-mono text-xs text-zinc-300" data-testid="access-invite-url">
                     {createdInvite.invite_url}
                   </div>
                   <button
@@ -190,7 +204,9 @@ function Access() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800">
-                {access.members.map((member) => (
+                {access.members.map((member) => {
+                  const canRemove = member.role !== 'owner';
+                  return (
                   <tr key={member.user_id} className="hover:bg-zinc-900/30">
                     <td className="px-4 py-3">
                       <div className="font-medium text-zinc-100">{member.name}</div>
@@ -201,16 +217,21 @@ function Access() {
                     </td>
                     <td className="px-4 py-3 text-zinc-500">{formatRelative(member.created_at)}</td>
                     <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => removeMember(member.user_id)}
-                        className="text-xs text-red-400 hover:text-red-300"
-                      >
-                        Remove
-                      </button>
+                      {canRemove ? (
+                        <button
+                          type="button"
+                          onClick={() => removeMember(member.user_id)}
+                          className="text-xs text-red-400 hover:text-red-300"
+                        >
+                          Remove
+                        </button>
+                      ) : (
+                        <span className="text-xs text-zinc-600">—</span>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </section>

@@ -79,12 +79,18 @@ function NewWorkload() {
   }
 
   return (
-    <form onSubmit={submit} className="space-y-6">
+    <form onSubmit={submit} className="space-y-6" data-testid="workload-new-form">
       <PageHeader title="New workload" eyebrow="Deploy container" />
       <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
         <div className={`${panelClass} space-y-5 p-5`}>
           <Field label="Host">
-            <select required value={hostId} onChange={(e) => setHostId(e.target.value)} className={inputClass}>
+            <select
+              required
+              value={hostId}
+              onChange={(e) => setHostId(e.target.value)}
+              className={inputClass}
+              data-testid="workload-host"
+            >
               <option value="">Choose host...</option>
               {hosts.map((h) => (
                 <option key={h.id} value={h.id}>
@@ -96,7 +102,13 @@ function NewWorkload() {
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Name">
-              <input required value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
+              <input
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className={inputClass}
+                data-testid="workload-name"
+              />
             </Field>
 
             <Field label="Image">
@@ -106,6 +118,7 @@ function NewWorkload() {
                 value={image}
                 onChange={(e) => setImage(e.target.value)}
                 className={inputClass}
+                data-testid="workload-image"
               />
             </Field>
           </div>
@@ -234,7 +247,12 @@ function NewWorkload() {
           </dl>
           {err && <p className="mt-4 text-sm text-red-400">{err}</p>}
           <div className="mt-5 flex gap-3">
-            <button type="submit" disabled={busy || !hosts.length} className={buttonPrimaryClass}>
+            <button
+              type="submit"
+              disabled={busy || !hosts.length}
+              className={buttonPrimaryClass}
+              data-testid="workload-submit"
+            >
               {busy ? 'Creating...' : 'Create workload'}
             </button>
             <button type="button" onClick={() => router.back()} className={buttonSecondaryClass}>

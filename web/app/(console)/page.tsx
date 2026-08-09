@@ -65,12 +65,12 @@ function Dashboard() {
   const recentFailures = events.filter((e) => e.kind.includes('fail') || e.kind.includes('error')).length;
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8" data-testid="dashboard-page">
       <PageHeader title="Fleet overview" eyebrow="Control plane">
-        <Link href="/hosts" className={buttonSecondaryClass}>
+        <Link href="/hosts" className={buttonSecondaryClass} data-testid="dashboard-add-host">
           Add host
         </Link>
-        <Link href="/workloads/new" className={buttonPrimaryClass}>
+        <Link href="/workloads/new" className={buttonPrimaryClass} data-testid="dashboard-new-workload">
           New workload
         </Link>
       </PageHeader>

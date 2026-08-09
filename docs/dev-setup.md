@@ -100,6 +100,18 @@ cargo build --workspace
 cargo run -p ember-control-plane
 cargo test -p ember-shared
 (cd web && pnpm dev)
+bash scripts/e2e.sh
+docker compose up --build
+```
+
+## End-to-end tests
+
+See the **Testing** section in the root `README.md`. Short version:
+
+```bash
+bash scripts/e2e.sh
+# optional Docker agent path
+E2E_AGENT_FLOW=1 bash scripts/e2e.sh
 ```
 
 ## What's Wired And What Isn't

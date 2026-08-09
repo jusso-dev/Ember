@@ -1,0 +1,54 @@
+# Production-style stack: control plane + web dashboard.
+# Agent still runs on each compute host (not in this compose file).
+#
+#   docker compose up --build
+#   open http://localhost:${EMBER_WEB_PORT:-3000}
+#
+# Homelab example (ports free on busy hosts):
+#   EMBER_WEB_PORT=3200 EMBER_CP_PORT=8080 \
+#   EMBER_PUBLIC_BASE_URL=http://100.125.10.32:3200 \
+#   docker compose up --build -d
+
+services:
+  control-plane:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ember-control-plane:local
+    restart: unless-stopped
+    ports:
+      - "${EMBER_CP_PORT:-8080}:8080"
+    environment:
+      EMBER_BIND_ADDR: 0.0.0.0:8080
+      EMBER_DB_URL: sqlite:///data/ember.db?mode=rwc
+      EMBER_PUBLIC_BASE_URL: ${EMBER_PUBLIC_BASE_URL:-http://localhost:3000}
+      RUST_LOG: ${RUST_LOG:-info,sqlx=warn,tower_http=info}
+    volumes:
+      - ember-db:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        CONTROL_PLANE_URL: http://control-plane:8080
+    image: ember-web:local
+    restart: unless-stopped
+    ports:
+      - "${EMBER_WEB_PORT:-3000}:3000"
+    environment:
+      CONTROL_PLANE_URL: http://control-plane:8080
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+    depends_on:
+      control-plane:
+        condition: service_healthy
+
+volumes:
+  ember-db:

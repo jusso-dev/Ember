@@ -1,0 +1,33 @@
+{
+  "name": "ember-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lightpanda + Playwright end-to-end tests for Ember README flows",
+  "type": "module",
+  "scripts": {
+    "postinstall": "node ./scripts/ensure-lightpanda.mjs",
+    "test": "playwright test",
+    "test:ui": "playwright test --ui",
+    "test:api": "playwright test --project=api",
+    "test:browser": "playwright test --project=lightpanda",
+    "report": "playwright show-report",
+    "stack:start": "tsx scripts/stack.ts start",
+    "stack:stop": "tsx scripts/stack.ts stop",
+    "stack:status": "tsx scripts/stack.ts status"
+  },
+  "devDependencies": {
+    "@lightpanda/browser": "^1.3.2",
+    "@playwright/test": "^1.51.0",
+    "@types/node": "^22.0.0",
+    "playwright-core": "^1.51.0",
+    "puppeteer-core": "^25.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@lightpanda/browser",
+      "esbuild"
+    ]
+  }
+}
