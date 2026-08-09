@@ -430,6 +430,15 @@ HTML report: `e2e/playwright-report` after a run (`cd e2e && pnpm report`).
 
 CI runs the same suite via `.github/workflows/ci.yml`.
 
+Security scanning uses free open-source [Trivy](https://github.com/aquasecurity/trivy) in `.github/workflows/trivy.yml`:
+
+- **Filesystem** — HIGH/CRITICAL vulns, secrets, and misconfig across the repo
+- **Container images** — builds `Dockerfile` + `web/Dockerfile` and scans them
+- **SARIF** — uploaded to GitHub Code Scanning (free on public repos)
+- Weekly schedule so new CVEs still surface without a push
+
+Findings fail the job. Suppress only with a short reason in `.trivyignore`.
+
 ## Configuration
 
 ### Control Plane

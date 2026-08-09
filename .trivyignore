@@ -1,0 +1,5 @@
+# Suppress known issues only with a short reason + ticket/URL when possible.
+# Prefer fixing or upgrading over ignores.
+#
+# Example:
+# CVE-2024-XXXXX  # not reachable; tracked in issue #N
