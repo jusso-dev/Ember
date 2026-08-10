@@ -1,0 +1,12 @@
+[
+  {
+    "date": "2026-08-10",
+    "macrostructure": "Workbench",
+    "theme": "custom",
+    "theme_axes": "dark / grotesk-sans / warm",
+    "vibe": "enterprise dark ops panel",
+    "enrichment": "none",
+    "scope": "app",
+    "brief": "Ember control plane — less AI slop, enterprise console"
+  }
+]

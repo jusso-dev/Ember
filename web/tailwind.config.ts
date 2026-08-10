@@ -5,6 +5,13 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
+        // Cool ops neutrals (mapped from design.md paper/ink)
+        coal: {
+          800: '#1e1f24',
+          900: '#16171c',
+          950: '#101114',
+        },
+        // Single brand accent — use sparingly
         ember: {
           50: '#fff7ed',
           100: '#ffedd5',
@@ -18,15 +25,22 @@ const config: Config = {
           900: '#7c2d12',
           950: '#431407',
         },
-        coal: {
-          800: '#1c1410',
-          900: '#140f0c',
-          950: '#0c0907',
-        },
+      },
+      fontFamily: {
+        sans: ['var(--font-inter)', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['var(--font-jetbrains)', 'ui-monospace', 'monospace'],
+      },
+      borderRadius: {
+        control: '4px',
+        panel: '6px',
       },
       boxShadow: {
-        ember: '0 0 24px -4px oklch(0.65 0.18 45 / 0.35)',
-        'ember-sm': '0 0 12px -2px oklch(0.65 0.16 45 / 0.25)',
+        // No glow — enterprise chrome is border-first
+        ember: 'none',
+        'ember-sm': 'none',
+      },
+      transitionDuration: {
+        short: '120ms',
       },
     },
   },

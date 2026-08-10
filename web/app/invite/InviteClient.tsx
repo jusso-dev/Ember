@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { EmberMark, buttonPrimaryClass, inputClass, panelClass } from '@/components/ControlPlaneUI';
+import { EmberMark, buttonPrimaryClass, inputClass, labelClass, panelClass } from '@/components/ControlPlaneUI';
 import { api, ApiError } from '@/lib/api';
 import type { AcceptInvitationRequest } from '@/lib/types/AcceptInvitationRequest';
 import type { InvitationPreview } from '@/lib/types/InvitationPreview';
@@ -56,9 +56,9 @@ export default function InviteClient() {
 
   if (loadErr) {
     return (
-      <main className="ember-hearth grid min-h-screen place-items-center px-4" data-testid="invite-page">
-        <div className={`${panelClass} w-full max-w-md p-6 shadow-ember`}>
-          <h1 className="text-xl font-semibold text-orange-50">Invitation unavailable</h1>
+      <main className="ember-auth-stage grid min-h-screen place-items-center px-4" data-testid="invite-page">
+        <div className={`${panelClass} w-full max-w-md p-6`}>
+          <h1 className="text-lg font-semibold text-zinc-50">Invitation unavailable</h1>
           <p className="mt-2 text-sm text-red-400" data-testid="invite-error">
             {loadErr}
           </p>
@@ -70,7 +70,7 @@ export default function InviteClient() {
   if (!preview) {
     return (
       <main
-        className="ember-hearth grid min-h-screen place-items-center text-orange-200/40"
+        className="ember-auth-stage grid min-h-screen place-items-center text-zinc-500"
         data-testid="invite-page"
       >
         Loading invitation…
@@ -79,66 +79,68 @@ export default function InviteClient() {
   }
 
   return (
-    <main className="ember-hearth grid min-h-screen place-items-center px-4" data-testid="invite-page">
+    <main className="ember-auth-stage grid min-h-screen place-items-center px-4" data-testid="invite-page">
       <form
         onSubmit={submit}
-        className={`${panelClass} w-full max-w-md space-y-4 p-6 shadow-ember`}
+        className={`${panelClass} w-full max-w-md space-y-4 p-6`}
         data-testid="invite-form"
       >
         <div className="flex items-start gap-3">
-          <EmberMark className="h-10 w-10 text-base" />
+          <EmberMark className="h-9 w-9 text-sm" />
           <div>
-            <div className="text-xs uppercase tracking-[0.14em] text-ember-500/80">Join the hearth</div>
-            <h1 className="mt-1 text-2xl font-semibold tracking-tight text-orange-50">Accept invitation</h1>
+            <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-zinc-500">
+              Invitation
+            </div>
+            <h1 className="mt-0.5 text-xl font-semibold tracking-tight text-zinc-50">Accept invitation</h1>
           </div>
         </div>
-        <dl className="rounded border border-orange-950/60 bg-coal-950/50 p-3 text-sm">
+        <dl className="rounded-control border border-zinc-800 bg-zinc-950/60 p-3 text-sm">
           <div className="flex justify-between gap-3">
-            <dt className="text-orange-200/40">Tenant</dt>
-            <dd className="font-medium text-orange-100">{preview.tenant_name}</dd>
+            <dt className="text-zinc-500">Tenant</dt>
+            <dd className="font-medium text-zinc-100">{preview.tenant_name}</dd>
           </div>
           <div className="mt-2 flex justify-between gap-3">
-            <dt className="text-orange-200/40">Email</dt>
-            <dd className="font-medium text-orange-100">{preview.email}</dd>
+            <dt className="text-zinc-500">Email</dt>
+            <dd className="font-medium text-zinc-100">{preview.email}</dd>
           </div>
           <div className="mt-2 flex justify-between gap-3">
-            <dt className="text-orange-200/40">Role</dt>
-            <dd className="font-medium capitalize text-orange-100">{preview.role}</dd>
+            <dt className="text-zinc-500">Role</dt>
+            <dd className="font-medium capitalize text-zinc-100">{preview.role}</dd>
           </div>
         </dl>
         <label className="block">
-          <span className="text-xs uppercase tracking-wider text-zinc-500">Your name</span>
+          <span className={labelClass}>Your name</span>
           <input
             required
             autoFocus
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`${inputClass} mt-1 py-2`}
+            className={`${inputClass} py-2`}
             data-testid="invite-name"
           />
         </label>
         <label className="block">
-          <span className="text-xs uppercase tracking-wider text-zinc-500">Password</span>
+          <span className={labelClass}>Password</span>
           <input
             type="password"
             required
             minLength={8}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className={`${inputClass} mt-1 py-2`}
+            className={`${inputClass} py-2`}
             data-testid="invite-password"
             autoComplete="new-password"
           />
         </label>
         <label className="block">
-          <span className="text-xs uppercase tracking-wider text-zinc-500">Confirm password</span>
+          <span className={labelClass}>Confirm password</span>
           <input
             type="password"
             required
             minLength={8}
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
-            className={`${inputClass} mt-1 py-2`}
+            className={`${inputClass} py-2`}
             data-testid="invite-confirm"
             autoComplete="new-password"
           />
@@ -148,7 +150,12 @@ export default function InviteClient() {
             {err}
           </p>
         )}
-        <button type="submit" disabled={busy} className={`${buttonPrimaryClass} w-full py-2`} data-testid="invite-submit">
+        <button
+          type="submit"
+          disabled={busy}
+          className={`${buttonPrimaryClass} w-full py-2`}
+          data-testid="invite-submit"
+        >
           {busy ? 'Joining…' : 'Join tenant'}
         </button>
       </form>

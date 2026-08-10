@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { EmberMark, buttonPrimaryClass, inputClass, panelClass } from '@/components/ControlPlaneUI';
+import { EmberMark, buttonPrimaryClass, inputClass, labelClass, panelClass } from '@/components/ControlPlaneUI';
 import { api, ApiError } from '@/lib/api';
 import type { SessionInfo } from '@/lib/types/SessionInfo';
 import type { CreateFirstUserRequest } from '@/lib/types/CreateFirstUserRequest';
@@ -61,58 +61,56 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
   const setup = mode === 'setup';
 
   return (
-    <main className="ember-hearth grid min-h-screen place-items-center px-4" data-testid="login-page">
+    <main className="ember-auth-stage grid min-h-screen place-items-center px-4" data-testid="login-page">
       <form
         onSubmit={submit}
-        className={`${panelClass} w-full max-w-md space-y-4 p-6 shadow-ember`}
+        className={`${panelClass} w-full max-w-md space-y-4 p-6`}
         data-testid={setup ? 'setup-form' : 'login-form'}
       >
         <div className="flex items-start gap-3">
-          <EmberMark className="h-10 w-10 text-base" />
+          <EmberMark className="h-9 w-9 text-sm" />
           <div>
-            <div className="text-xs uppercase tracking-[0.14em] text-ember-500/80">Control plane</div>
+            <div className="text-[11px] font-medium uppercase tracking-[0.06em] text-zinc-500">
+              Control plane
+            </div>
             <h1
-              className="mt-1 text-2xl font-semibold tracking-tight text-orange-50"
+              className="mt-0.5 text-xl font-semibold tracking-tight text-zinc-50"
               data-testid="auth-heading"
             >
-              {setup
-                ? 'Light the first fire'
-                : mfaStep
-                  ? 'Prove the spark'
-                  : 'Sign in to Ember'}
+              {setup ? 'Create owner account' : mfaStep ? 'Multi-factor authentication' : 'Sign in to Ember'}
             </h1>
           </div>
         </div>
-        <p className="text-sm text-orange-200/45">
+        <p className="text-sm text-zinc-500">
           {setup
-            ? 'This is the first user for this control plane. The account will receive the owner role.'
+            ? 'First user on this control plane receives the owner role for the initial tenant.'
             : mfaStep
-              ? 'Enter the 6-digit code from your authenticator app, or a recovery code.'
-              : 'Use your Ember user account to access this control plane.'}
+              ? 'Enter the 6-digit authenticator code, or a recovery code.'
+              : 'Sign in with your Ember account credentials.'}
         </p>
         {setup && (
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="block">
-              <span className="text-xs uppercase tracking-wider text-zinc-500">Name</span>
+              <span className={labelClass}>Name</span>
               <input
                 autoFocus
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className={`${inputClass} mt-1 py-2`}
+                className={`${inputClass} py-2`}
                 data-testid="setup-name"
                 name="name"
                 autoComplete="name"
               />
             </label>
             <label className="block">
-              <span className="text-xs uppercase tracking-wider text-zinc-500">Tenant name</span>
+              <span className={labelClass}>Tenant name</span>
               <input
                 required
                 placeholder="Homelab"
                 value={tenantName}
                 onChange={(e) => setTenantName(e.target.value)}
-                className={`${inputClass} mt-1 py-2`}
+                className={`${inputClass} py-2`}
                 data-testid="setup-tenant"
                 name="tenant_name"
               />
@@ -122,28 +120,28 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
         {!mfaStep && (
           <>
             <label className="block">
-              <span className="text-xs uppercase tracking-wider text-zinc-500">Email</span>
+              <span className={labelClass}>Email</span>
               <input
                 type="email"
                 autoFocus={!setup}
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className={`${inputClass} mt-1 py-2`}
+                className={`${inputClass} py-2`}
                 data-testid="auth-email"
                 name="email"
                 autoComplete="email"
               />
             </label>
             <label className="block">
-              <span className="text-xs uppercase tracking-wider text-zinc-500">Password</span>
+              <span className={labelClass}>Password</span>
               <input
                 type="password"
                 required
                 minLength={setup ? 8 : undefined}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className={`${inputClass} mt-1 py-2`}
+                className={`${inputClass} py-2`}
                 data-testid="auth-password"
                 name="password"
                 autoComplete={setup ? 'new-password' : 'current-password'}
@@ -153,14 +151,14 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
         )}
         {setup && (
           <label className="block">
-            <span className="text-xs uppercase tracking-wider text-zinc-500">Confirm password</span>
+            <span className={labelClass}>Confirm password</span>
             <input
               type="password"
               required
               minLength={8}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
-              className={`${inputClass} mt-1 py-2`}
+              className={`${inputClass} py-2`}
               data-testid="setup-confirm-password"
               name="confirm_password"
               autoComplete="new-password"
@@ -169,7 +167,7 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
         )}
         {mfaStep && (
           <label className="block">
-            <span className="text-xs uppercase tracking-wider text-zinc-500">Authenticator code</span>
+            <span className={labelClass}>Authenticator code</span>
             <input
               autoFocus
               required
@@ -177,7 +175,7 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
               autoComplete="one-time-code"
               value={totpCode}
               onChange={(e) => setTotpCode(e.target.value)}
-              className={`${inputClass} mt-1 py-2`}
+              className={`${inputClass} py-2 font-mono tracking-widest`}
               data-testid="auth-totp"
               name="totp_code"
               placeholder="123456"
@@ -185,8 +183,8 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
           </label>
         )}
         {setup && (
-          <div className="rounded border border-orange-950/60 bg-coal-950/50 p-3 text-sm text-orange-200/45">
-            Owner can manage users, roles, MFA policy, hosts, workloads, volumes, and enrollment tokens.
+          <div className="rounded-control border border-zinc-800 bg-zinc-950/60 p-3 text-sm text-zinc-500">
+            Owner can manage users, roles, MFA, hosts, workloads, volumes, and enrollment tokens.
           </div>
         )}
         {err && (
@@ -200,12 +198,12 @@ export default function LoginClient({ initialMode }: { initialMode: 'setup' | 'l
           className={`${buttonPrimaryClass} w-full py-2`}
           data-testid="auth-submit"
         >
-          {busy ? 'Please wait...' : setup ? 'Create account' : mfaStep ? 'Verify and sign in' : 'Sign in'}
+          {busy ? 'Please wait…' : setup ? 'Create account' : mfaStep ? 'Verify and sign in' : 'Sign in'}
         </button>
         {mfaStep && (
           <button
             type="button"
-            className="w-full text-center text-xs text-orange-200/40 hover:text-ember-300"
+            className="w-full text-center text-xs text-zinc-500 transition-colors duration-short hover:text-zinc-300"
             onClick={() => {
               setMfaStep(false);
               setTotpCode('');
