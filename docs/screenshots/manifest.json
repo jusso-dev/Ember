@@ -1,18 +1,54 @@
 {
-  "base": "http://127.0.0.1:13200",
+  "base": "http://127.0.0.1:3300",
+  "capturedAt": "2026-08-10T09:02:31.183Z",
   "shots": [
-    "01-login",
-    "02-dashboard",
-    "03-hosts",
-    "05-workloads",
-    "06-workload-new",
-    "07-volumes",
-    "08-volume-new",
-    "09-access",
-    "10-audit",
-    "11-control-plane-logs",
-    "12-cloud-foundation",
-    "04-hosts-enroll"
-  ],
-  "capturedAt": "2026-08-09T09:59:04.741Z"
+    {
+      "name": "01-login",
+      "file": "docs/screenshots/01-login.png"
+    },
+    {
+      "name": "02-dashboard",
+      "file": "docs/screenshots/02-dashboard.png"
+    },
+    {
+      "name": "03-hosts",
+      "file": "docs/screenshots/03-hosts.png"
+    },
+    {
+      "name": "05-workloads",
+      "file": "docs/screenshots/05-workloads.png"
+    },
+    {
+      "name": "06-workload-new",
+      "file": "docs/screenshots/06-workload-new.png"
+    },
+    {
+      "name": "07-volumes",
+      "file": "docs/screenshots/07-volumes.png"
+    },
+    {
+      "name": "08-volume-new",
+      "file": "docs/screenshots/08-volume-new.png"
+    },
+    {
+      "name": "09-access",
+      "file": "docs/screenshots/09-access.png"
+    },
+    {
+      "name": "10-audit",
+      "file": "docs/screenshots/10-audit.png"
+    },
+    {
+      "name": "11-control-plane-logs",
+      "file": "docs/screenshots/11-control-plane-logs.png"
+    },
+    {
+      "name": "12-cloud-foundation",
+      "file": "docs/screenshots/12-cloud-foundation.png"
+    },
+    {
+      "name": "04-hosts-enroll",
+      "file": "docs/screenshots/04-hosts-enroll.png"
+    }
+  ]
 }

@@ -43,6 +43,13 @@ async function main() {
   });
   const page = await context.newPage();
   page.setDefaultTimeout(30_000);
+  // Hide Next.js dev indicator / portals so README shots stay product-clean.
+  await page.addInitScript(() => {
+    const style = document.createElement('style');
+    style.textContent =
+      'nextjs-portal,[data-next-badge-root],#__next-build-watcher{display:none!important}';
+    document.documentElement.appendChild(style);
+  });
 
   await page.goto(`${BASE}/login`, { waitUntil: 'networkidle' });
   await page.waitForSelector('[data-testid="login-page"]');

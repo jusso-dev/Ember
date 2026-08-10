@@ -39,11 +39,24 @@ test.describe('README volume + workload forms (no agent)', () => {
       (el) => (el as HTMLInputElement).value,
     );
     expect(image).toBe('nginx:alpine');
-    const disabled = await authedPage.$eval(
+    // Auto-place is the default: submit is enabled without a pinned host.
+    const autoPlace = await authedPage.$eval(
+      '[data-testid="workload-placement-auto"]',
+      (el) => (el as HTMLInputElement).checked,
+    );
+    expect(autoPlace).toBe(true);
+    const enabledWithAuto = await authedPage.$eval(
       '[data-testid="workload-submit"]',
       (el) => (el as HTMLButtonElement).disabled,
     );
-    expect(disabled).toBe(true);
+    expect(enabledWithAuto).toBe(false);
+    // Pin-host mode with zero hosts keeps submit disabled.
+    await authedPage.click('[data-testid="workload-placement-auto"]');
+    const disabledPinned = await authedPage.$eval(
+      '[data-testid="workload-submit"]',
+      (el) => (el as HTMLButtonElement).disabled,
+    );
+    expect(disabledPinned).toBe(true);
     const addPort = await authedPage.$('xpath///button[contains(., "Add port")]');
     if (addPort) {
       await addPort.click();
