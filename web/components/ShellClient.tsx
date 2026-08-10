@@ -203,8 +203,6 @@ export function ShellClient({
     }
   }
 
-  const activeGroup = NAV_GROUPS.find((group) => group.items.some((item) => isActive(pathname, item.href)));
-
   return (
     <div className="min-h-screen bg-zinc-950" data-testid="app-shell">
       <header className="sticky top-0 z-20 border-b border-zinc-800 bg-zinc-950">
@@ -306,18 +304,11 @@ export function ShellClient({
           }`}
         >
           <div className="flex h-full flex-col">
-            <div className="flex items-center justify-between border-b border-zinc-800 px-2 py-2">
-              {!collapsed && (
-                <div className="min-w-0 px-1">
-                  <div className="truncate text-[11px] font-medium uppercase tracking-[0.06em] text-zinc-500">
-                    {activeGroup?.label ?? 'Navigation'}
-                  </div>
-                </div>
-              )}
+            <div className="flex items-center justify-end border-b border-zinc-800 px-2 py-2">
               <button
                 type="button"
                 onClick={() => setCollapsed((value) => !value)}
-                className="ml-auto grid h-7 w-7 place-items-center rounded-control border border-zinc-800 text-xs text-zinc-400 transition-colors duration-short hover:bg-zinc-900 hover:text-zinc-100"
+                className="grid h-7 w-7 place-items-center rounded-control border border-zinc-800 text-xs text-zinc-400 transition-colors duration-short hover:bg-zinc-900 hover:text-zinc-100"
                 aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
                 title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
               >
