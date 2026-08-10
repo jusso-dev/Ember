@@ -1,0 +1,35 @@
+# Ember TLS edge on free port (Kelpie already owns :443).
+# docker compose -f deploy/caddy/docker-compose.edge.yml up -d
+#
+# Trust internal CA once on clients if needed, or use -k for smoke.
+
+# Ports avoid Kelpie (:443), Tailscale serve (:8443), other labs (:9443).
+# HTTPS uses localhost SAN so curl https://localhost:32443 works with -k.
+{
+	auto_https disable_redirects
+}
+
+localhost:32443 {
+	tls internal
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:3200
+	}
+}
+
+:32088 {
+	encode gzip
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	handle {
+		reverse_proxy 127.0.0.1:3200
+	}
+}

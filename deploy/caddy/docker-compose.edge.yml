@@ -1,0 +1,16 @@
+# Optional TLS edge for Ember when host :443 is already taken.
+# Publishes 8443 (HTTPS internal) and 8088 (HTTP).
+services:
+  ember-edge:
+    image: caddy:2.11-alpine
+    container_name: ember-edge
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./Caddyfile.homelab-edge:/etc/caddy/Caddyfile:ro
+      - ember-edge-data:/data
+      - ember-edge-config:/config
+
+volumes:
+  ember-edge-data:
+  ember-edge-config:
