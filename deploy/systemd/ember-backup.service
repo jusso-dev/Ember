@@ -1,0 +1,12 @@
+[Unit]
+Description=Ember control plane SQLite backup
+After=network.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/ember/control-plane.env
+# Requires a session cookie or API token with owner/admin.
+# Prefer:
+#   EMBER_CP_URL=http://127.0.0.1:8080
+#   EMBER_API_TOKEN=ember_...
+ExecStart=/usr/local/bin/ember-backup.sh

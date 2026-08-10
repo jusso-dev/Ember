@@ -179,6 +179,7 @@ fn cookie_from_header(parts: &Parts) -> Option<String> {
 pub struct AdminSession {
     pub user: UserInfo,
     pub tenant: TenantInfo,
+    pub via_api_token: bool,
 }
 
 #[async_trait]
@@ -189,13 +190,28 @@ impl FromRequestParts<AppState> for AdminSession {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let token = cookie_from_header(parts).ok_or(AppError::Unauthorized)?;
-        let identity = session_identity(&state.pool, &token)
-            .await
-            .map_err(AppError::Anyhow)?;
-        identity
-            .map(|(user, tenant)| AdminSession { user, tenant })
-            .ok_or(AppError::Unauthorized)
+        // Prefer session cookie, then API token Bearer.
+        if let Some(token) = cookie_from_header(parts) {
+            let identity = session_identity(&state.pool, &token)
+                .await
+                .map_err(AppError::Anyhow)?;
+            if let Some((user, tenant)) = identity {
+                return Ok(AdminSession {
+                    user,
+                    tenant,
+                    via_api_token: false,
+                });
+            }
+        }
+        if let Some(bearer) = bearer_token(parts) {
+            if let Some(session) = api_token_identity(&state.pool, &bearer)
+                .await
+                .map_err(AppError::Anyhow)?
+            {
+                return Ok(session);
+            }
+        }
+        Err(AppError::Unauthorized)
     }
 }
 
@@ -205,5 +221,68 @@ pub fn bearer_token(parts: &Parts) -> Option<String> {
         .get(axum::http::header::AUTHORIZATION)?
         .to_str()
         .ok()?;
-    header.strip_prefix("Bearer ").map(|s| s.to_string())
+    header
+        .strip_prefix("Bearer ")
+        .or_else(|| header.strip_prefix("bearer "))
+        .map(|s| s.trim().to_string())
+}
+
+async fn api_token_identity(
+    pool: &sqlx::SqlitePool,
+    raw: &str,
+) -> anyhow::Result<Option<AdminSession>> {
+    if !raw.starts_with("ember_") {
+        return Ok(None);
+    }
+    let hash = sha256_hex(raw);
+    let row: Option<(
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<DateTime<Utc>>,
+    )> = sqlx::query_as(
+        "SELECT api_tokens.user_id, users.email, users.name, api_tokens.role, \
+                tenants.id, tenants.name, tenants.slug, api_tokens.id, api_tokens.expires_at \
+         FROM api_tokens \
+         JOIN users ON users.id = api_tokens.user_id \
+         JOIN tenants ON tenants.id = api_tokens.tenant_id \
+         WHERE api_tokens.token_hash = ? AND users.disabled_at IS NULL",
+    )
+    .bind(&hash)
+    .fetch_optional(pool)
+    .await?;
+    let Some((user_id, email, name, role, tenant_id, tenant_name, tenant_slug, token_id, expires)) =
+        row
+    else {
+        return Ok(None);
+    };
+    if let Some(exp) = expires {
+        if exp <= Utc::now() {
+            return Ok(None);
+        }
+    }
+    let _ = sqlx::query("UPDATE api_tokens SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind(&token_id)
+        .execute(pool)
+        .await;
+    Ok(Some(AdminSession {
+        user: UserInfo {
+            id: user_id,
+            email,
+            name,
+            role: role.clone(),
+        },
+        tenant: TenantInfo {
+            id: tenant_id,
+            name: tenant_name,
+            slug: tenant_slug,
+            role,
+        },
+        via_api_token: true,
+    }))
 }

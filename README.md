@@ -35,14 +35,13 @@ EMBER_EMAIL=owner@ember.e2e EMBER_PASSWORD=ember-e2e-password-1 \
 Ember lets you:
 
 - Create a first owner account and tenant on first run.
-- Invite users into the active tenant with roles such as `admin`, `operator`, `viewer`, and `auditor`.
-- Enroll a machine as an Ember host.
-- See whether enrolled hosts are pending, online, or offline.
-- Create host-local volumes.
-- Start, stop, and remove Docker containers on a selected host.
-- Attach ready volumes to workloads as bind mounts.
-- Publish container ports to the host.
-- Track recent control-plane, host, workload, and volume events.
+- Invite users (accept flow) with roles such as `admin`, `operator`, `viewer`, and `auditor`.
+- Optional TOTP MFA and tenant admission policy (image/port/quota).
+- Secrets vault + registry credentials; CI API tokens (`ember_*`).
+- Enroll a machine as an Ember host; cordon/labels for placement.
+- Create host-local volumes; start/stop/remove Docker workloads (auto-place or pin host).
+- Attach ready volumes to workloads as bind mounts; publish ports.
+- Track events (poll + SSE stream), audit chain, and SQLite backups.
 
 The current implementation manages Docker containers directly on each host through the agent. It does not run a Kubernetes cluster, create an overlay network, or migrate workloads between hosts.
 
@@ -127,13 +126,13 @@ Current tenant roles:
 
 | Role | Intent |
 | --- | --- |
-| `owner` | Full tenant control, including users, roles, MFA policy in future, infrastructure, and tokens. |
+| `owner` | Full tenant control, including users, roles, MFA, policy, secrets, infrastructure, and API tokens. |
 | `admin` | Manage users below owner level and operate all infrastructure. |
 | `operator` | Deploy and operate workloads, volumes, and host actions. |
 | `viewer` | Read-only access to resources and activity. |
 | `auditor` | Read-only access focused on security and activity review. |
 
-Important current state: tenant records, memberships, invites, and session active tenant are implemented. Full per-tenant scoping of hosts, workloads, volumes, tasks, and events is the next enforcement pass.
+Tenant records, memberships, invite accept (`/invite?token=`), and session active tenant are implemented. Hosts, workloads, volumes, events, and enrollment tokens are tenant-filtered on hot paths.
 
 ### Task Model
 
@@ -524,19 +523,31 @@ cargo test -p ember-shared
 
 exports TypeScript definitions into `web/lib/types/`.
 
+## Enterprise P0/P1 (shipped)
+
+| Area | Status |
+| --- | --- |
+| Invite accept | `/invite?token=` + `POST /api/invitations/accept` |
+| MFA TOTP + recovery | Security page + login step; recovery codes on setup |
+| API tokens | `ember_*` Bearer tokens under Security |
+| Admission policy | deny `:latest`, image allowlist, port allowlist, quotas |
+| Secrets | AES-GCM vault; env `secret:NAME` resolved at dispatch |
+| Placement | optional `host_id`; auto online host + label selector; cordon |
+| SSE activity | `GET /api/events/stream` |
+| Backup | `POST /api/admin/backup` + `deploy/` recipes |
+| TLS / agent package | `deploy/caddy`, `deploy/systemd`, release workflow, install.sh release URL |
+
 ## Current Limitations
 
 - Docker is the only compute backend.
-- Workloads are pinned to one host and are not automatically rescheduled elsewhere.
-- Tenant accounts, memberships, invites, and active sessions exist, but infrastructure resources are not yet fully tenant-scoped in SQL.
-- MFA tables and flows are not implemented yet. The auth model has been structured so TOTP and recovery codes can be added cleanly.
-- Invitation acceptance flow is not implemented yet. Owners/admins can create and revoke invitation links.
-- The `hostdir` volume backend creates directories but does not enforce size limits.
+- Workloads do not auto-migrate when a host dies (placement is create-time only).
+- Some resource columns remain nullable from migration backfill; dual-tenant e2e is still thin.
+- The `hostdir` volume backend creates directories but does not enforce size limits on disk.
 - `loopback_ext4` is represented in the protocol and UI but is not implemented in the agent.
-- Browser updates are polling-based, roughly every 2-3 seconds. There is no browser SSE/WebSocket push yet.
-- There is no log streaming.
-- There is no TLS termination in this repo. Put a reverse proxy in front for remote deployments.
-- The installer script is intentionally minimal. It can install from `EMBER_AGENT_BIN_URL` or fall back to `cargo install --git`; there are no official prebuilt release artifacts yet.
+- UI still polls many lists; SSE feed exists for activity events.
+- Official agent release assets publish on tag (`v*`); until then install.sh falls back to cargo.
+
+Deploy profile: [`deploy/README.md`](deploy/README.md). Full backlog: [`docs/enterprise-control-plane-roadmap.md`](docs/enterprise-control-plane-roadmap.md).
 
 ## Development Notes
 

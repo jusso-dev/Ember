@@ -244,7 +244,7 @@ pub async fn create_invitation(
         expires_at: expires_at.to_rfc3339(),
         created_at: Utc::now().to_rfc3339(),
         invite_url: Some(format!(
-            "{}/login?invite={}",
+            "{}/invite?token={}",
             state.public_base_url.as_str(),
             token
         )),
@@ -350,6 +350,180 @@ async fn require_access_admin(
             Err(AppError::Forbidden)
         }
     }
+}
+
+pub async fn preview_invitation(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<ember_shared::protocol::InvitationPreview>, AppError> {
+    let token = q
+        .get("token")
+        .ok_or_else(|| AppError::BadRequest("token required".into()))?;
+    let hash = sha256_hex(token);
+    let row: Option<(String, String, DateTime<Utc>, String)> = sqlx::query_as(
+        "SELECT i.email, i.role, i.expires_at, t.name \
+         FROM tenant_invitations i JOIN tenants t ON t.id = i.tenant_id \
+         WHERE i.token_hash = ? AND i.accepted_at IS NULL",
+    )
+    .bind(&hash)
+    .fetch_optional(&state.pool)
+    .await?;
+    let (email, role, expires_at, tenant_name) =
+        row.ok_or_else(|| AppError::NotFound)?;
+    if expires_at <= Utc::now() {
+        return Err(AppError::BadRequest("invitation expired".into()));
+    }
+    Ok(Json(ember_shared::protocol::InvitationPreview {
+        email,
+        role,
+        tenant_name,
+        expires_at: expires_at.to_rfc3339(),
+    }))
+}
+
+pub async fn accept_invitation(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<ember_shared::protocol::AcceptInvitationRequest>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    use crate::auth::{create_session, hash_password, session_cookie, SESSION_TTL_SECS};
+    use axum::http::header::SET_COOKIE;
+    use axum::http::StatusCode;
+
+    if req.password.len() < 8 {
+        return Err(AppError::BadRequest(
+            "password must be at least 8 characters".into(),
+        ));
+    }
+    let name = req.name.trim();
+    if name.is_empty() {
+        return Err(AppError::BadRequest("name is required".into()));
+    }
+    let hash = sha256_hex(&req.token);
+    let row: Option<(String, String, String, String, DateTime<Utc>)> = sqlx::query_as(
+        "SELECT i.id, i.tenant_id, i.email, i.role, i.expires_at \
+         FROM tenant_invitations i \
+         WHERE i.token_hash = ? AND i.accepted_at IS NULL",
+    )
+    .bind(&hash)
+    .fetch_optional(&state.pool)
+    .await?;
+    let (invite_id, tenant_id, email, role, expires_at) =
+        row.ok_or_else(|| AppError::NotFound)?;
+    if expires_at <= Utc::now() {
+        return Err(AppError::BadRequest("invitation expired".into()));
+    }
+
+    let password_hash = hash_password(&req.password).map_err(AppError::Anyhow)?;
+    let user_id = {
+        let existing: Option<(String,)> =
+            sqlx::query_as("SELECT id FROM users WHERE email = ? COLLATE NOCASE")
+                .bind(&email)
+                .fetch_optional(&state.pool)
+                .await?;
+        if let Some((uid,)) = existing {
+            let already: Option<(String,)> = sqlx::query_as(
+                "SELECT user_id FROM tenant_memberships WHERE tenant_id = ? AND user_id = ?",
+            )
+            .bind(&tenant_id)
+            .bind(&uid)
+            .fetch_optional(&state.pool)
+            .await?;
+            if already.is_some() {
+                return Err(AppError::Conflict("already a member".into()));
+            }
+            sqlx::query(
+                "INSERT INTO tenant_memberships (tenant_id, user_id, role) VALUES (?, ?, ?)",
+            )
+            .bind(&tenant_id)
+            .bind(&uid)
+            .bind(&role)
+            .execute(&state.pool)
+            .await?;
+            uid
+        } else {
+            let uid = Uuid::now_v7().to_string();
+            sqlx::query(
+                "INSERT INTO users (id, email, name, password_hash, role) VALUES (?, ?, ?, ?, ?)",
+            )
+            .bind(&uid)
+            .bind(&email)
+            .bind(name)
+            .bind(&password_hash)
+            .bind(&role)
+            .execute(&state.pool)
+            .await?;
+            sqlx::query(
+                "INSERT INTO tenant_memberships (tenant_id, user_id, role) VALUES (?, ?, ?)",
+            )
+            .bind(&tenant_id)
+            .bind(&uid)
+            .bind(&role)
+            .execute(&state.pool)
+            .await?;
+            uid
+        }
+    };
+
+    sqlx::query("UPDATE tenant_invitations SET accepted_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind(&invite_id)
+        .execute(&state.pool)
+        .await?;
+
+    let tenant: (String, String, String) =
+        sqlx::query_as("SELECT id, name, slug FROM tenants WHERE id = ?")
+            .bind(&tenant_id)
+            .fetch_one(&state.pool)
+            .await?;
+
+    let (session_token, _) = create_session(&state.pool, &user_id, &tenant_id)
+        .await
+        .map_err(AppError::Anyhow)?;
+
+    audit::record(
+        &state,
+        &AuditActor::anonymous(&headers)
+            .with_user_id(&user_id)
+            .with_email(&email)
+            .with_tenant_id(&tenant_id),
+        "access.invitation.accept",
+        Some("invitation"),
+        Some(&invite_id),
+        RESULT_SUCCESS,
+        Some(json!({ "role": role })),
+    )
+    .await;
+
+    let mut headers_out = HeaderMap::new();
+    headers_out.insert(
+        SET_COOKIE,
+        session_cookie(&session_token, SESSION_TTL_SECS)
+            .parse()
+            .unwrap(),
+    );
+
+    Ok((
+        StatusCode::OK,
+        headers_out,
+        Json(ember_shared::protocol::SessionInfo {
+            authenticated: true,
+            setup_required: false,
+            user: Some(ember_shared::protocol::UserInfo {
+                id: user_id,
+                email,
+                name: name.to_string(),
+                role: role.clone(),
+            }),
+            active_tenant: Some(ember_shared::protocol::TenantInfo {
+                id: tenant.0,
+                name: tenant.1,
+                slug: tenant.2,
+                role,
+            }),
+            mfa_enabled: false,
+            mfa_required: false,
+        }),
+    ))
 }
 
 fn validate_invite_role(role: &str) -> Result<(), AppError> {

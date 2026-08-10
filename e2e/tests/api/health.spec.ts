@@ -12,6 +12,7 @@ test.describe('README health surface', () => {
   });
 
   test('web proxy rewrites /api/health to control plane', async ({ request }) => {
+    test.skip(process.env.E2E_SKIP_WEB === '1' || process.env.E2E_SKIP_WEB === 'true', 'web not required for API-only');
     const res = await request.get(`${baseUrl()}/api/health`);
     expect(res.ok()).toBeTruthy();
     const body = await res.json();
@@ -19,6 +20,7 @@ test.describe('README health surface', () => {
   });
 
   test('installer script is served by the web app', async ({ request }) => {
+    test.skip(process.env.E2E_SKIP_WEB === '1' || process.env.E2E_SKIP_WEB === 'true', 'web not required for API-only');
     const res = await request.get(`${baseUrl()}/install.sh`);
     expect(res.ok()).toBeTruthy();
     const text = await res.text();

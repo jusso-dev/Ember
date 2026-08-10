@@ -2,6 +2,7 @@ use crate::agent_ws::{container_name, log_event};
 use crate::audit::{self, AuditActor, RESULT_SUCCESS};
 use crate::auth::AdminSession;
 use crate::error::AppError;
+use crate::policy;
 use crate::scheduler;
 use crate::state::AppState;
 use axum::extract::{Path, State};
@@ -14,76 +15,22 @@ use ember_shared::protocol::{
 use serde_json::json;
 use uuid::Uuid;
 
-pub async fn list(
-    admin: AdminSession,
-    State(state): State<AppState>,
-) -> Result<Json<Vec<WorkloadSummary>>, AppError> {
-    let rows: Vec<(
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        DateTime<Utc>,
-    )> = sqlx::query_as(
-        "SELECT w.id, w.name, w.host_id, h.name, w.image, w.desired_state, w.observed_state, \
-         w.container_id, w.last_error, w.created_at \
-         FROM workloads w JOIN hosts h ON h.id = w.host_id \
-         WHERE w.tenant_id = ? \
-         ORDER BY w.created_at DESC",
-    )
-    .bind(&admin.tenant.id)
-    .fetch_all(&state.pool)
-    .await?;
-    let out = rows
-        .into_iter()
-        .map(|t| WorkloadSummary {
-            id: t.0,
-            name: t.1,
-            host_id: t.2,
-            host_name: t.3,
-            image: t.4,
-            desired_state: t.5,
-            observed_state: t.6,
-            container_id: t.7,
-            last_error: t.8,
-            created_at: t.9.to_rfc3339(),
-        })
-        .collect();
-    Ok(Json(out))
-}
+type WlRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    DateTime<Utc>,
+    String,
+);
 
-pub async fn get(
-    admin: AdminSession,
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> Result<Json<WorkloadSummary>, AppError> {
-    let row: Option<(
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        DateTime<Utc>,
-    )> = sqlx::query_as(
-        "SELECT w.id, w.name, w.host_id, h.name, w.image, w.desired_state, w.observed_state, \
-         w.container_id, w.last_error, w.created_at \
-         FROM workloads w JOIN hosts h ON h.id = w.host_id WHERE w.id = ? AND w.tenant_id = ?",
-    )
-    .bind(&id)
-    .bind(&admin.tenant.id)
-    .fetch_optional(&state.pool)
-    .await?;
-    let t = row.ok_or(AppError::NotFound)?;
-    Ok(Json(WorkloadSummary {
+fn map_wl(t: WlRow) -> WorkloadSummary {
+    WorkloadSummary {
         id: t.0,
         name: t.1,
         host_id: t.2,
@@ -94,7 +41,42 @@ pub async fn get(
         container_id: t.7,
         last_error: t.8,
         created_at: t.9.to_rfc3339(),
-    }))
+        labels: policy::labels_from_json(&t.10),
+    }
+}
+
+pub async fn list(
+    admin: AdminSession,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<WorkloadSummary>>, AppError> {
+    let rows: Vec<WlRow> = sqlx::query_as(
+        "SELECT w.id, w.name, w.host_id, h.name, w.image, w.desired_state, w.observed_state, \
+         w.container_id, w.last_error, w.created_at, COALESCE(w.labels_json, '{}') \
+         FROM workloads w JOIN hosts h ON h.id = w.host_id \
+         WHERE w.tenant_id = ? \
+         ORDER BY w.created_at DESC",
+    )
+    .bind(&admin.tenant.id)
+    .fetch_all(&state.pool)
+    .await?;
+    Ok(Json(rows.into_iter().map(map_wl).collect()))
+}
+
+pub async fn get(
+    admin: AdminSession,
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<WorkloadSummary>, AppError> {
+    let row: Option<WlRow> = sqlx::query_as(
+        "SELECT w.id, w.name, w.host_id, h.name, w.image, w.desired_state, w.observed_state, \
+         w.container_id, w.last_error, w.created_at, COALESCE(w.labels_json, '{}') \
+         FROM workloads w JOIN hosts h ON h.id = w.host_id WHERE w.id = ? AND w.tenant_id = ?",
+    )
+    .bind(&id)
+    .bind(&admin.tenant.id)
+    .fetch_optional(&state.pool)
+    .await?;
+    Ok(Json(map_wl(row.ok_or(AppError::NotFound)?)))
 }
 
 pub async fn create(
@@ -107,15 +89,18 @@ pub async fn create(
         return Err(AppError::BadRequest("name and image required".into()));
     }
 
-    // Validate host exists.
-    let host_row: Option<(String, String)> =
-        sqlx::query_as("SELECT id, name FROM hosts WHERE id = ? AND tenant_id = ?")
-            .bind(&req.host_id)
-            .bind(&admin.tenant.id)
-            .fetch_optional(&state.pool)
-            .await?;
-    let (host_id, host_name) =
-        host_row.ok_or_else(|| AppError::BadRequest("host not found".into()))?;
+    let tenant_policy = policy::load(&state.pool, &admin.tenant.id).await?;
+    policy::check_image(&tenant_policy, &req.image)?;
+    policy::check_ports(&tenant_policy, &req.ports)?;
+    policy::check_workload_quota(&state.pool, &admin.tenant.id, &tenant_policy).await?;
+
+    let (host_id, host_name) = resolve_host(
+        &state.pool,
+        &admin.tenant.id,
+        req.host_id.as_deref(),
+        &req.placement_labels,
+    )
+    .await?;
 
     // Resolve volume host paths (must be ready).
     let mut mounts: Vec<MountSpec> = Vec::with_capacity(req.volumes.len());
@@ -145,6 +130,10 @@ pub async fn create(
         });
     }
 
+    // Keep secret:NAME refs in DB; resolve only when dispatching to agent.
+    let resolved_env =
+        super::secrets::resolve_env(&state.pool, &admin.tenant.id, &req.env).await?;
+
     let workload_id = Uuid::now_v7().to_string();
     let env_json = serde_json::to_string(&req.env).unwrap();
     let ports_json = serde_json::to_string(&req.ports).unwrap();
@@ -152,10 +141,11 @@ pub async fn create(
         .command
         .as_ref()
         .map(|c| serde_json::to_string(c).unwrap());
+    let labels_json = policy::labels_to_json(&req.labels);
 
     sqlx::query(
-        "INSERT INTO workloads (id, name, host_id, image, env_json, ports_json, command_json, desired_state, observed_state, tenant_id) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'running', 'pending', ?)",
+        "INSERT INTO workloads (id, name, host_id, image, env_json, ports_json, command_json, desired_state, observed_state, tenant_id, labels_json) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'running', 'pending', ?, ?)",
     )
     .bind(&workload_id)
     .bind(&req.name)
@@ -165,6 +155,7 @@ pub async fn create(
     .bind(&ports_json)
     .bind(command_json.as_deref())
     .bind(&admin.tenant.id)
+    .bind(&labels_json)
     .execute(&state.pool)
     .await
     .map_err(|e| match e {
@@ -191,7 +182,7 @@ pub async fn create(
         workload_id: workload_id.clone(),
         name: container_name(&workload_id),
         image: req.image.clone(),
-        env: req.env.clone(),
+        env: resolved_env,
         ports: req.ports.clone(),
         mounts,
         command: req.command.clone(),
@@ -241,7 +232,57 @@ pub async fn create(
         container_id: None,
         last_error: None,
         created_at: Utc::now().to_rfc3339(),
+        labels: req.labels,
     }))
+}
+
+async fn resolve_host(
+    pool: &sqlx::SqlitePool,
+    tenant_id: &str,
+    host_id: Option<&str>,
+    placement_labels: &[(String, String)],
+) -> Result<(String, String), AppError> {
+    if let Some(hid) = host_id.map(str::trim).filter(|s| !s.is_empty()) {
+        let row: Option<(String, String, String, i64)> = sqlx::query_as(
+            "SELECT id, name, COALESCE(labels_json, '{}'), COALESCE(cordoned, 0) \
+             FROM hosts WHERE id = ? AND tenant_id = ?",
+        )
+        .bind(hid)
+        .bind(tenant_id)
+        .fetch_optional(pool)
+        .await?;
+        let (id, name, labels_json, cordoned) =
+            row.ok_or_else(|| AppError::BadRequest("host not found".into()))?;
+        if cordoned != 0 {
+            return Err(AppError::BadRequest("host is cordoned".into()));
+        }
+        let labels = policy::labels_from_json(&labels_json);
+        if !policy::host_matches_labels(&labels, placement_labels) {
+            return Err(AppError::BadRequest(
+                "host does not match placement labels".into(),
+            ));
+        }
+        return Ok((id, name));
+    }
+
+    // Placement: online, not cordoned, matching labels, newest heartbeats first.
+    let rows: Vec<(String, String, String)> = sqlx::query_as(
+        "SELECT id, name, COALESCE(labels_json, '{}') FROM hosts \
+         WHERE tenant_id = ? AND status = 'online' AND COALESCE(cordoned, 0) = 0 \
+         ORDER BY last_seen_at DESC",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
+    for (id, name, labels_json) in rows {
+        let labels = policy::labels_from_json(&labels_json);
+        if policy::host_matches_labels(&labels, placement_labels) {
+            return Ok((id, name));
+        }
+    }
+    Err(AppError::BadRequest(
+        "no online host matches placement requirements".into(),
+    ))
 }
 
 pub async fn start(
@@ -260,7 +301,9 @@ pub async fn start(
     let (host_id, name, image, env_json, command_json, ports_json) =
         row.ok_or(AppError::NotFound)?;
     let snapshot = workload_audit_snapshot(&id, &name, &host_id, &image, &env_json, &ports_json);
-    let env: Vec<(String, String)> = serde_json::from_str(&env_json).unwrap_or_default();
+    let env_refs: Vec<(String, String)> = serde_json::from_str(&env_json).unwrap_or_default();
+    let env =
+        super::secrets::resolve_env(&state.pool, &admin.tenant.id, &env_refs).await?;
     let ports: Vec<ember_shared::protocol::PortMapping> =
         serde_json::from_str(&ports_json).unwrap_or_default();
     let command: Option<Vec<String>> = command_json.and_then(|s| serde_json::from_str(&s).ok());

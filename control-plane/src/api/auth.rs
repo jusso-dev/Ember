@@ -71,6 +71,54 @@ pub async fn login(
         .await;
         return Err(AppError::Unauthorized);
     }
+
+    let mfa_row: Option<(i64, Option<String>)> =
+        sqlx::query_as("SELECT mfa_enabled, mfa_secret FROM users WHERE id = ?")
+            .bind(&id)
+            .fetch_optional(&state.pool)
+            .await?;
+    let (mfa_enabled_flag, mfa_secret) = mfa_row.unwrap_or((0, None));
+    if mfa_enabled_flag != 0 {
+        let code = body.totp_code.as_deref().unwrap_or("").trim();
+        if code.is_empty() {
+            audit::record(
+                &state,
+                &AuditActor::anonymous(&headers)
+                    .with_email(&email)
+                    .with_user_id(&id),
+                "auth.login",
+                Some("user"),
+                Some(&id),
+                RESULT_FAILURE,
+                Some(json!({ "reason": "mfa_required" })),
+            )
+            .await;
+            return Err(AppError::BadRequest("mfa_required".into()));
+        }
+        let secret = mfa_secret.unwrap_or_default();
+        let ok_totp = crate::crypto::verify_totp(&secret, code);
+        let ok_recovery = if !ok_totp {
+            try_consume_recovery_code(&state.pool, &id, code).await?
+        } else {
+            false
+        };
+        if !ok_totp && !ok_recovery {
+            audit::record(
+                &state,
+                &AuditActor::anonymous(&headers)
+                    .with_email(&email)
+                    .with_user_id(&id),
+                "auth.login",
+                Some("user"),
+                Some(&id),
+                RESULT_FAILURE,
+                Some(json!({ "reason": "bad_mfa" })),
+            )
+            .await;
+            return Err(AppError::Unauthorized);
+        }
+    }
+
     let tenant: (String, String, String, String) = sqlx::query_as(
         "SELECT t.id, t.name, t.slug, tm.role \
          FROM tenant_memberships tm JOIN tenants t ON t.id = tm.tenant_id \
@@ -120,8 +168,33 @@ pub async fn login(
                 role: active_tenant.role.clone(),
             }),
             active_tenant: Some(active_tenant),
+            mfa_enabled: mfa_enabled_flag != 0,
+            mfa_required: false,
         }),
     ))
+}
+
+async fn try_consume_recovery_code(
+    pool: &sqlx::SqlitePool,
+    user_id: &str,
+    code: &str,
+) -> Result<bool, AppError> {
+    let hash = crate::auth::sha256_hex(code);
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT id FROM mfa_recovery_codes WHERE user_id = ? AND code_hash = ? AND used_at IS NULL",
+    )
+    .bind(user_id)
+    .bind(&hash)
+    .fetch_optional(pool)
+    .await?;
+    let Some((id,)) = row else {
+        return Ok(false);
+    };
+    sqlx::query("UPDATE mfa_recovery_codes SET used_at = CURRENT_TIMESTAMP WHERE id = ?")
+        .bind(&id)
+        .execute(pool)
+        .await?;
+    Ok(true)
 }
 
 pub async fn create_first_user(
@@ -217,6 +290,8 @@ pub async fn create_first_user(
                 slug: tenant_slug,
                 role,
             }),
+            mfa_enabled: false,
+            mfa_required: false,
         }),
     ))
 }
@@ -256,6 +331,8 @@ pub async fn logout(
             setup_required,
             user: None,
             active_tenant: None,
+            mfa_enabled: false,
+            mfa_required: false,
         }),
     ))
 }
@@ -268,6 +345,8 @@ pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> Json<
             setup_required,
             user: None,
             active_tenant: None,
+            mfa_enabled: false,
+            mfa_required: false,
         });
     };
     let identity = session_identity(&state.pool, &token).await.unwrap_or(None);
@@ -275,11 +354,25 @@ pub async fn session(State(state): State<AppState>, headers: HeaderMap) -> Json<
         Some(identity) => (Some(identity.0), Some(identity.1)),
         None => (None, None),
     };
+    let mfa_enabled = if let Some(ref u) = user {
+        sqlx::query_as::<_, (i64,)>("SELECT mfa_enabled FROM users WHERE id = ?")
+            .bind(&u.id)
+            .fetch_optional(&state.pool)
+            .await
+            .ok()
+            .flatten()
+            .map(|(v,)| v != 0)
+            .unwrap_or(false)
+    } else {
+        false
+    };
     Json(SessionInfo {
         authenticated: user.is_some(),
         setup_required,
         user,
         active_tenant,
+        mfa_enabled,
+        mfa_required: false,
     })
 }
 

@@ -143,6 +143,7 @@ impl FixedWindowLimiter {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeConfig {
+    pub db_url: String,
     pub audit_retention_days: i64,
     pub control_plane_log_retention_days: i64,
     pub workload_log_retention_days: i64,
@@ -153,6 +154,7 @@ pub struct RuntimeConfig {
 impl RuntimeConfig {
     pub fn from_config(config: &Config) -> Self {
         Self {
+            db_url: config.db_url.clone(),
             audit_retention_days: config.audit_retention_days,
             control_plane_log_retention_days: config.control_plane_log_retention_days,
             workload_log_retention_days: config.workload_log_retention_days,

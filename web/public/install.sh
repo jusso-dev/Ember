@@ -63,17 +63,29 @@ fi
 
 mkdir -p "$INSTALL_DIR" "$STATE_DIR" "$VOLUMES_DIR"
 
-if [ -n "$BIN_URL" ]; then
+arch="$(uname -m)"
+case "$arch" in
+  x86_64|amd64) release_arch="amd64" ;;
+  aarch64|arm64) release_arch="arm64" ;;
+  *) release_arch="" ;;
+esac
+
+# Prefer explicit URL, then latest GitHub release asset, then cargo.
+if [ -z "$BIN_URL" ] && [ -n "$release_arch" ]; then
+  BIN_URL="https://github.com/jusso-dev/Ember/releases/latest/download/ember-agent-linux-${release_arch}"
+fi
+
+if [ -n "$BIN_URL" ] && curl -fsI "$BIN_URL" >/dev/null 2>&1; then
   echo "Downloading ember-agent from $BIN_URL"
   tmp="$(mktemp)"
   curl -fsSL "$BIN_URL" -o "$tmp"
   install -m 0755 "$tmp" "$INSTALL_DIR/ember-agent"
   rm -f "$tmp"
 elif command -v cargo >/dev/null 2>&1; then
-  echo "Installing ember-agent from $REPO_URL with cargo"
+  echo "Installing ember-agent from $REPO_URL with cargo (no release binary found)"
   cargo install --git "$REPO_URL" ember-agent --locked --force --root /usr/local
 else
-  echo "No prebuilt binary URL was provided and cargo is not installed." >&2
+  echo "No prebuilt binary was available and cargo is not installed." >&2
   echo "Set EMBER_AGENT_BIN_URL or install Rust/Cargo, then rerun this command." >&2
   exit 1
 fi

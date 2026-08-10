@@ -66,6 +66,14 @@ pub async fn create(
             "backend must be hostdir or loopback_ext4".into(),
         ));
     }
+    let tenant_policy = crate::policy::load(&state.pool, &admin.tenant.id).await?;
+    crate::policy::check_volume_quota(
+        &state.pool,
+        &admin.tenant.id,
+        &tenant_policy,
+        req.size_mb,
+    )
+    .await?;
     let host: Option<(String, String)> =
         sqlx::query_as("SELECT id, name FROM hosts WHERE id = ? AND tenant_id = ?")
             .bind(&req.host_id)

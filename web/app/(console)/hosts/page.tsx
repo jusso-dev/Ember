@@ -66,6 +66,15 @@ function Hosts() {
     }
   }
 
+  async function toggleCordon(h: HostSummary) {
+    try {
+      await api.put(`/api/hosts/${h.id}`, { cordoned: !h.cordoned, labels: null });
+      reload();
+    } catch (e) {
+      alert(String(e));
+    }
+  }
+
   const visibleHosts = hosts.filter((h) => {
     const matchesFilter = filter === 'all' || h.status === filter;
     const text = `${h.name} ${h.os ?? ''} ${h.arch ?? ''} ${h.agent_version ?? ''}`.toLowerCase();
@@ -183,13 +192,14 @@ ember-agent run`}
               <th className="px-4 py-2">OS / arch</th>
               <th className="px-4 py-2">Agent</th>
               <th className="px-4 py-2">Last seen</th>
+              <th className="px-4 py-2">Labels</th>
               <th className="px-4 py-2"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-800">
             {hosts.length === 0 && (
               <tr>
-                <td colSpan={6}>
+                <td colSpan={7}>
                   <EmptyState
                     title="No hosts enrolled"
                     body="Add a host to give Ember somewhere to place workloads and create volumes."
@@ -205,14 +215,21 @@ ember-agent run`}
             )}
             {hosts.length > 0 && visibleHosts.length === 0 && (
               <tr>
-                <td className="px-4 py-8 text-center text-sm text-zinc-500" colSpan={6}>
+                <td className="px-4 py-8 text-center text-sm text-zinc-500" colSpan={7}>
                   No hosts match the current filters.
                 </td>
               </tr>
             )}
             {visibleHosts.map((h) => (
               <tr key={h.id} className="hover:bg-zinc-900/30">
-                <td className="px-4 py-2 font-mono">{h.name}</td>
+                <td className="px-4 py-2 font-mono">
+                  {h.name}
+                  {h.cordoned && (
+                    <span className="ml-2 text-xs text-amber-400" data-testid="host-cordoned">
+                      cordoned
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-2">
                   <StatusBadge state={h.status} />
                 </td>
@@ -223,7 +240,17 @@ ember-agent run`}
                 <td className="px-4 py-2 text-zinc-400">
                   <span title={h.last_seen_at ?? undefined}>{formatRelative(h.last_seen_at)}</span>
                 </td>
-                <td className="px-4 py-2 text-right">
+                <td className="px-4 py-2 font-mono text-xs text-zinc-500">
+                  {(h.labels ?? []).map(([k, v]) => `${k}=${v}`).join(', ') || '—'}
+                </td>
+                <td className="px-4 py-2 text-right space-x-2">
+                  <button
+                    onClick={() => toggleCordon(h)}
+                    className="text-xs text-amber-400 hover:text-amber-300"
+                    data-testid="host-cordon-toggle"
+                  >
+                    {h.cordoned ? 'Uncordon' : 'Cordon'}
+                  </button>
                   <button
                     onClick={() => remove(h.id)}
                     className="text-xs text-red-400 hover:text-red-300"

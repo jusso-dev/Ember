@@ -22,9 +22,12 @@ services:
       EMBER_BIND_ADDR: 0.0.0.0:8080
       EMBER_DB_URL: sqlite:///data/ember.db?mode=rwc
       EMBER_PUBLIC_BASE_URL: ${EMBER_PUBLIC_BASE_URL:-http://localhost:3000}
+      EMBER_SECRETS_KEY: ${EMBER_SECRETS_KEY:-ember-lab-secrets-key-change-me}
+      EMBER_BACKUP_DIR: /data/backups
       RUST_LOG: ${RUST_LOG:-info,sqlx=warn,tower_http=info}
     volumes:
       - ember-db:/data
+      - ember-backups:/data/backups
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/api/health"]
       interval: 15s
@@ -52,3 +55,4 @@ services:
 
 volumes:
   ember-db:
+  ember-backups:

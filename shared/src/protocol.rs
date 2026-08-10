@@ -15,6 +15,9 @@ pub struct Health {
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
+    /// TOTP code when MFA is enabled for the user.
+    #[serde(default)]
+    pub totp_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -24,6 +27,10 @@ pub struct SessionInfo {
     pub setup_required: bool,
     pub user: Option<UserInfo>,
     pub active_tenant: Option<TenantInfo>,
+    #[serde(default)]
+    pub mfa_enabled: bool,
+    #[serde(default)]
+    pub mfa_required: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -132,6 +139,10 @@ pub struct HostSummary {
     pub agent_version: Option<String>,
     pub last_seen_at: Option<String>,
     pub created_at: String,
+    #[serde(default)]
+    pub labels: Vec<(String, String)>,
+    #[serde(default)]
+    pub cordoned: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -182,13 +193,20 @@ pub struct VolumeAttachment {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export, export_to = "../../web/lib/types/")]
 pub struct CreateWorkloadRequest {
-    pub host_id: String,
+    /// Optional; when empty, control plane places on best online host.
+    #[serde(default)]
+    pub host_id: Option<String>,
     pub name: String,
     pub image: String,
     pub env: Vec<(String, String)>,
     pub ports: Vec<PortMapping>,
     pub volumes: Vec<VolumeAttachment>,
     pub command: Option<Vec<String>>,
+    #[serde(default)]
+    pub labels: Vec<(String, String)>,
+    /// Host label selector: host must have all of these labels.
+    #[serde(default)]
+    pub placement_labels: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -204,6 +222,8 @@ pub struct WorkloadSummary {
     pub container_id: Option<String>,
     pub last_error: Option<String>,
     pub created_at: String,
+    #[serde(default)]
+    pub labels: Vec<(String, String)>,
 }
 
 // --- Volumes ---
@@ -213,6 +233,8 @@ pub struct WorkloadSummary {
 pub struct CreateVolumeRequest {
     pub host_id: String,
     pub name: String,
+    /// JSON number (fits JS safely for homelab sizes).
+    #[ts(type = "number")]
     pub size_mb: u64,
     pub backend: String, // "hostdir" | "loopback_ext4"
 }
@@ -224,6 +246,7 @@ pub struct VolumeSummary {
     pub name: String,
     pub host_id: String,
     pub host_name: String,
+    #[ts(type = "number")]
     pub size_mb: u64,
     pub backend: String,
     pub host_path: Option<String>,
@@ -369,6 +392,7 @@ pub struct MountSpec {
 #[ts(export, export_to = "../../web/lib/types/")]
 pub struct VolumeProvisionSpec {
     pub volume_id: String,
+    #[ts(type = "number")]
     pub size_mb: u64,
     pub backend: String, // "hostdir" | "loopback_ext4"
 }
@@ -467,4 +491,143 @@ pub enum AgentMsg {
     AgentLogs {
         batch: Vec<AgentLogLine>,
     },
+}
+
+// --- P0/P1 enterprise types ---
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct AcceptInvitationRequest {
+    pub token: String,
+    pub name: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct InvitationPreview {
+    pub email: String,
+    pub role: String,
+    pub tenant_name: String,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct MfaSetupResponse {
+    pub secret: String,
+    pub otpauth_url: String,
+    pub recovery_codes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct MfaConfirmRequest {
+    pub totp_code: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct MfaStatus {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct CreateApiTokenRequest {
+    pub name: String,
+    /// Optional role override (defaults to caller's tenant role, capped at operator for safety).
+    #[serde(default)]
+    pub role: Option<String>,
+    pub expires_days: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct ApiTokenSummary {
+    pub id: String,
+    pub name: String,
+    pub token_prefix: String,
+    pub role: String,
+    pub expires_at: Option<String>,
+    pub last_used_at: Option<String>,
+    pub created_at: String,
+    /// Only set once on create.
+    pub token_once: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct TenantPolicy {
+    pub deny_latest_tag: bool,
+    pub image_allowlist: Vec<String>,
+    pub max_workloads: Option<u32>,
+    pub max_volumes: Option<u32>,
+    #[ts(type = "number | null")]
+    pub max_volume_mb_total: Option<u64>,
+    pub allowed_host_ports: Vec<u16>,
+    pub require_mfa_admins: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct UpdateTenantPolicyRequest {
+    pub deny_latest_tag: bool,
+    pub image_allowlist: Vec<String>,
+    pub max_workloads: Option<u32>,
+    pub max_volumes: Option<u32>,
+    #[ts(type = "number | null")]
+    pub max_volume_mb_total: Option<u64>,
+    pub allowed_host_ports: Vec<u16>,
+    pub require_mfa_admins: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct CreateSecretRequest {
+    pub name: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct SecretSummary {
+    pub id: String,
+    pub name: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct CreateRegistryCredentialRequest {
+    pub registry: String,
+    pub username: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct RegistryCredentialSummary {
+    pub id: String,
+    pub registry: String,
+    pub username: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct UpdateHostRequest {
+    #[serde(default)]
+    pub labels: Option<Vec<(String, String)>>,
+    #[serde(default)]
+    pub cordoned: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "../../web/lib/types/")]
+pub struct BackupResponse {
+    pub path: String,
+    #[ts(type = "number")]
+    pub bytes: u64,
+    pub created_at: String,
 }

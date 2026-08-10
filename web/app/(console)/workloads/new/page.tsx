@@ -26,6 +26,8 @@ function NewWorkload() {
   const [hosts, setHosts] = useState<HostSummary[]>([]);
   const [volumes, setVolumes] = useState<VolumeSummary[]>([]);
   const [hostId, setHostId] = useState('');
+  const [placementAuto, setPlacementAuto] = useState(true);
+  const [placementLabels, setPlacementLabels] = useState('');
   const [name, setName] = useState('');
   const [image, setImage] = useState('');
   const [command, setCommand] = useState('');
@@ -40,14 +42,28 @@ function NewWorkload() {
       .get<HostSummary[]>('/api/hosts')
       .then((h) => {
         setHosts(h);
-        if (h.length && !hostId) setHostId(h[0].id);
+        if (h.length && !hostId && !placementAuto) setHostId(h[0].id);
       })
       .catch(() => {});
     api.get<VolumeSummary[]>('/api/volumes').then(setVolumes).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const eligibleVolumes = volumes.filter((v) => v.host_id === hostId && v.status === 'ready');
+  const eligibleVolumes = volumes.filter(
+    (v) => (!hostId || v.host_id === hostId) && v.status === 'ready',
+  );
+
+  function parseLabels(raw: string): Array<[string, string]> {
+    return raw
+      .split(/[\n,]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((pair) => {
+        const i = pair.indexOf('=');
+        if (i <= 0) return [pair, 'true'] as [string, string];
+        return [pair.slice(0, i).trim(), pair.slice(i + 1).trim()] as [string, string];
+      });
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -55,7 +71,7 @@ function NewWorkload() {
     setErr(null);
     try {
       const body = {
-        host_id: hostId,
+        host_id: placementAuto || !hostId ? null : hostId,
         name,
         image,
         env: env.filter((e) => e.key).map((e) => [e.key, e.value]),
@@ -68,6 +84,8 @@ function NewWorkload() {
           .filter((m) => m.volume_id && m.mount_path)
           .map((m) => ({ volume_id: m.volume_id, mount_path: m.mount_path, read_only: m.read_only })),
         command: command.trim() ? command.trim().split(/\s+/) : null,
+        labels: [],
+        placement_labels: parseLabels(placementLabels),
       };
       await api.post('/api/workloads', body);
       router.push('/workloads');
@@ -83,21 +101,40 @@ function NewWorkload() {
       <PageHeader title="New workload" eyebrow="Deploy container" />
       <div className="grid gap-6 lg:grid-cols-[1fr_20rem]">
         <div className={`${panelClass} space-y-5 p-5`}>
-          <Field label="Host">
-            <select
-              required
-              value={hostId}
-              onChange={(e) => setHostId(e.target.value)}
-              className={inputClass}
-              data-testid="workload-host"
-            >
-              <option value="">Choose host...</option>
-              {hosts.map((h) => (
-                <option key={h.id} value={h.id}>
-                  {h.name} ({h.status})
-                </option>
-              ))}
-            </select>
+          <Field label="Placement">
+            <label className="mb-2 flex items-center gap-2 text-sm text-zinc-300">
+              <input
+                type="checkbox"
+                checked={placementAuto}
+                onChange={(e) => setPlacementAuto(e.target.checked)}
+                data-testid="workload-placement-auto"
+              />
+              Auto-place on best online host
+            </label>
+            {!placementAuto && (
+              <select
+                required
+                value={hostId}
+                onChange={(e) => setHostId(e.target.value)}
+                className={inputClass}
+                data-testid="workload-host"
+              >
+                <option value="">Choose host...</option>
+                {hosts.map((h) => (
+                  <option key={h.id} value={h.id} disabled={h.cordoned}>
+                    {h.name} ({h.status}
+                    {h.cordoned ? ', cordoned' : ''})
+                  </option>
+                ))}
+              </select>
+            )}
+            <input
+              className={`${inputClass} mt-2`}
+              placeholder="placement labels: zone=a, gpu=true"
+              value={placementLabels}
+              onChange={(e) => setPlacementLabels(e.target.value)}
+              data-testid="workload-placement-labels"
+            />
           </Field>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -239,7 +276,14 @@ function NewWorkload() {
         <aside className={`${panelClass} h-fit p-5`}>
           <div className="text-xs uppercase tracking-wider text-zinc-500">Deployment plan</div>
           <dl className="mt-4 space-y-3 text-sm">
-            <PlanRow label="Host" value={hosts.find((h) => h.id === hostId)?.name ?? 'not selected'} />
+            <PlanRow
+              label="Host"
+              value={
+                placementAuto
+                  ? 'auto'
+                  : hosts.find((h) => h.id === hostId)?.name ?? 'not selected'
+              }
+            />
             <PlanRow label="Image" value={image || 'not set'} />
             <PlanRow label="Ports" value={ports.length ? String(ports.length) : 'none'} />
             <PlanRow label="Env" value={env.length ? String(env.length) : 'none'} />
@@ -249,7 +293,7 @@ function NewWorkload() {
           <div className="mt-5 flex gap-3">
             <button
               type="submit"
-              disabled={busy || !hosts.length}
+              disabled={busy || (!placementAuto && !hosts.length)}
               className={buttonPrimaryClass}
               data-testid="workload-submit"
             >

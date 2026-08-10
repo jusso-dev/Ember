@@ -1,51 +1,57 @@
 use crate::audit::{self, AuditActor, RESULT_SUCCESS};
 use crate::auth::{random_token, sha256_hex, AdminSession};
 use crate::error::AppError;
+use crate::policy;
 use crate::state::AppState;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::Json;
 use chrono::{DateTime, Utc};
-use ember_shared::protocol::{EnrollTokenResponse, HostSummary};
+use ember_shared::protocol::{EnrollTokenResponse, HostSummary, UpdateHostRequest};
 use serde_json::json;
 use uuid::Uuid;
+
+type HostRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<DateTime<Utc>>,
+    DateTime<Utc>,
+    String,
+    i64,
+);
+
+fn map_host(row: HostRow) -> HostSummary {
+    HostSummary {
+        id: row.0,
+        name: row.1,
+        status: row.2,
+        os: row.3,
+        arch: row.4,
+        agent_version: row.5,
+        last_seen_at: row.6.map(|t| t.to_rfc3339()),
+        created_at: row.7.to_rfc3339(),
+        labels: policy::labels_from_json(&row.8),
+        cordoned: row.9 != 0,
+    }
+}
 
 pub async fn list(
     admin: AdminSession,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<HostSummary>>, AppError> {
-    let rows: Vec<(
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<DateTime<Utc>>,
-        DateTime<Utc>,
-    )> = sqlx::query_as(
-        "SELECT id, name, status, os, arch, agent_version, last_seen_at, created_at \
+    let rows: Vec<HostRow> = sqlx::query_as(
+        "SELECT id, name, status, os, arch, agent_version, last_seen_at, created_at, \
+         COALESCE(labels_json, '{}'), COALESCE(cordoned, 0) \
          FROM hosts WHERE tenant_id = ? ORDER BY created_at DESC",
     )
     .bind(&admin.tenant.id)
     .fetch_all(&state.pool)
     .await?;
-    let out = rows
-        .into_iter()
-        .map(
-            |(id, name, status, os, arch, agent_version, last_seen_at, created_at)| HostSummary {
-                id,
-                name,
-                status,
-                os,
-                arch,
-                agent_version,
-                last_seen_at: last_seen_at.map(|t| t.to_rfc3339()),
-                created_at: created_at.to_rfc3339(),
-            },
-        )
-        .collect();
-    Ok(Json(out))
+    Ok(Json(rows.into_iter().map(map_host).collect()))
 }
 
 pub async fn get(
@@ -53,35 +59,64 @@ pub async fn get(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<HostSummary>, AppError> {
-    let row: Option<(
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<DateTime<Utc>>,
-        DateTime<Utc>,
-    )> = sqlx::query_as(
-        "SELECT id, name, status, os, arch, agent_version, last_seen_at, created_at \
+    let row: Option<HostRow> = sqlx::query_as(
+        "SELECT id, name, status, os, arch, agent_version, last_seen_at, created_at, \
+         COALESCE(labels_json, '{}'), COALESCE(cordoned, 0) \
          FROM hosts WHERE id = ? AND tenant_id = ?",
     )
     .bind(&id)
     .bind(&admin.tenant.id)
     .fetch_optional(&state.pool)
     .await?;
-    let (id, name, status, os, arch, agent_version, last_seen_at, created_at) =
-        row.ok_or(AppError::NotFound)?;
-    Ok(Json(HostSummary {
-        id,
-        name,
-        status,
-        os,
-        arch,
-        agent_version,
-        last_seen_at: last_seen_at.map(|t| t.to_rfc3339()),
-        created_at: created_at.to_rfc3339(),
-    }))
+    Ok(Json(map_host(row.ok_or(AppError::NotFound)?)))
+}
+
+pub async fn update(
+    admin: AdminSession,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateHostRequest>,
+) -> Result<Json<HostSummary>, AppError> {
+    if matches!(admin.tenant.role.as_str(), "viewer" | "auditor") {
+        return Err(AppError::Forbidden);
+    }
+    let exists: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM hosts WHERE id = ? AND tenant_id = ?")
+            .bind(&id)
+            .bind(&admin.tenant.id)
+            .fetch_optional(&state.pool)
+            .await?;
+    if exists.is_none() {
+        return Err(AppError::NotFound);
+    }
+    if let Some(labels) = &req.labels {
+        sqlx::query("UPDATE hosts SET labels_json = ? WHERE id = ? AND tenant_id = ?")
+            .bind(policy::labels_to_json(labels))
+            .bind(&id)
+            .bind(&admin.tenant.id)
+            .execute(&state.pool)
+            .await?;
+    }
+    if let Some(cordoned) = req.cordoned {
+        sqlx::query("UPDATE hosts SET cordoned = ? WHERE id = ? AND tenant_id = ?")
+            .bind(if cordoned { 1 } else { 0 })
+            .bind(&id)
+            .bind(&admin.tenant.id)
+            .execute(&state.pool)
+            .await?;
+    }
+    audit::record(
+        &state,
+        &AuditActor::from_admin(&admin, &headers),
+        "host.update",
+        Some("host"),
+        Some(&id),
+        RESULT_SUCCESS,
+        Some(json!({ "cordoned": req.cordoned, "labels": req.labels })),
+    )
+    .await;
+    get(admin, State(state), Path(id)).await
 }
 
 pub async fn delete(

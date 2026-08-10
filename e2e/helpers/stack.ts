@@ -96,7 +96,14 @@ export async function startStack(): Promise<StackState> {
       pids: {},
     };
     await waitForUrl(`${state.controlPlaneUrl}/api/health`);
-    await waitForUrl(state.baseUrl);
+    // Browser projects need the web app; API-only can skip (E2E_SKIP_WEB=1 or base==cp).
+    const skipWeb =
+      process.env.E2E_SKIP_WEB === '1' ||
+      process.env.E2E_SKIP_WEB === 'true' ||
+      state.baseUrl.replace(/\/$/, '') === state.controlPlaneUrl.replace(/\/$/, '');
+    if (!skipWeb) {
+      await waitForUrl(state.baseUrl);
+    }
     writeState(state);
     return state;
   }

@@ -1,0 +1,22 @@
+[Unit]
+Description=Ember agent
+Documentation=https://github.com/justinmiddler/Ember
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=-/etc/ember/agent.env
+# agent.env example:
+#   EMBER_SERVER=https://ember.example.com
+#   EMBER_TOKEN=<agent token from enroll>
+#   EMBER_HOST_NAME=%H
+ExecStart=/usr/local/bin/ember-agent run
+Restart=always
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

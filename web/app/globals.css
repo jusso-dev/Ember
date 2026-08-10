@@ -4,13 +4,38 @@
 
 :root {
   color-scheme: dark;
+  --ember-coal: oklch(0.14 0.015 45);
+  --ember-ash: oklch(0.2 0.02 40);
+  --ember-glow: oklch(0.72 0.18 45);
+  --ember-flame: oklch(0.68 0.19 35);
+  --ember-core: oklch(0.78 0.16 70);
 }
 
 body {
-  color: oklch(0.93 0.01 255);
-  background:
-    radial-gradient(circle at 18% 0%, oklch(0.28 0.04 245 / 0.3), transparent 28rem),
-    linear-gradient(180deg, oklch(0.18 0.008 255), oklch(0.145 0.009 255));
+  color: oklch(0.93 0.02 70);
+  background-color: var(--ember-coal);
+  background-image:
+    radial-gradient(ellipse 90% 55% at 50% 115%, oklch(0.42 0.14 35 / 0.35), transparent 55%),
+    radial-gradient(circle at 12% -8%, oklch(0.45 0.12 45 / 0.28), transparent 32rem),
+    radial-gradient(circle at 92% 8%, oklch(0.38 0.1 25 / 0.18), transparent 28rem),
+    linear-gradient(180deg, oklch(0.16 0.02 40), oklch(0.12 0.015 35));
+  background-attachment: fixed;
+}
+
+/* Subtle coal grain so the surface feels like banked fire, not flat UI chrome. */
+body::before {
+  content: '';
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+body > * {
+  position: relative;
+  z-index: 1;
 }
 
 /* Dark datetime controls often paint unreadable native chrome. */
@@ -21,10 +46,70 @@ input[type='time'] {
 }
 
 input::placeholder {
-  color: oklch(0.55 0.01 255);
+  color: oklch(0.55 0.03 55);
   opacity: 1;
 }
 
 ::selection {
-  background: oklch(0.64 0.14 245 / 0.35);
+  background: oklch(0.65 0.16 45 / 0.4);
+  color: oklch(0.98 0.02 80);
+}
+
+/* Brand mark — living coal */
+@keyframes ember-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 1px oklch(0.55 0.14 40 / 0.35),
+      0 0 12px oklch(0.65 0.18 45 / 0.35),
+      inset 0 -6px 12px oklch(0.35 0.12 30 / 0.45);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px oklch(0.7 0.16 50 / 0.5),
+      0 0 22px oklch(0.72 0.19 50 / 0.55),
+      inset 0 -4px 10px oklch(0.45 0.14 35 / 0.5);
+  }
+}
+
+@keyframes ember-flicker {
+  0%,
+  100% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+  40% {
+    opacity: 0.92;
+    filter: brightness(1.08);
+  }
+  70% {
+    opacity: 0.97;
+    filter: brightness(0.95);
+  }
+}
+
+.ember-mark {
+  background: linear-gradient(
+    160deg,
+    oklch(0.78 0.16 70) 0%,
+    oklch(0.65 0.19 45) 45%,
+    oklch(0.48 0.16 30) 100%
+  );
+  color: oklch(0.16 0.03 40);
+  animation: ember-pulse 3.2s ease-in-out infinite, ember-flicker 2.4s ease-in-out infinite;
+}
+
+.ember-glow-text {
+  background: linear-gradient(100deg, oklch(0.92 0.06 80), oklch(0.78 0.14 50), oklch(0.7 0.16 35));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Login / invite atmospheric stage */
+.ember-hearth {
+  background-image:
+    radial-gradient(ellipse 70% 40% at 50% 100%, oklch(0.5 0.16 40 / 0.45), transparent 60%),
+    radial-gradient(circle at 50% 0%, oklch(0.35 0.08 45 / 0.25), transparent 40%),
+    linear-gradient(180deg, oklch(0.15 0.02 40), oklch(0.11 0.015 35));
 }
