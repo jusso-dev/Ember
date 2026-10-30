@@ -31,7 +31,8 @@ ENV NODE_ENV=production \
     CONTROL_PLANE_URL=http://control-plane:8080
 # Drop global npm/npx and its nested package tree — standalone only needs the
 # node binary. Leaves Trivy free of HIGH/CRITICAL node-pkg noise from npm itself.
-RUN useradd --system --uid 10001 nextjs \
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 nextjs \
     && mkdir -p /app/.next \
     && chown -R nextjs:nextjs /app \
     && rm -rf /usr/local/lib/node_modules \
