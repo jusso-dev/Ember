@@ -26,7 +26,6 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "@lightpanda/browser",
       "esbuild"
     ]
   }
